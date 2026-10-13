@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg-primary: #0B0B0D;
+    --bg-secondary: #0F0F12;
+    --bg-panel: #121216;
+    --bg-control: #1B1B22;
+    --border: #27272D;
+    --text-primary: #FFFFFF;
+    --text-secondary: #A1A1AA;
+    --text-muted: #8A8A93;
+    --accent: #FFB800;
+    --accent-hover: #FFC526;
+    --success: #22C55E;
+    --danger: #EF4444;
+  }
+  
+  body {
+    @apply bg-bg-primary text-text-primary antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
