@@ -1,8 +1,8 @@
 import React from "react"
 import { 
   Plus, Trash2, RotateCcw, RotateCw, ChevronDown, ChevronUp, 
-  Sparkles, Sliders, Type, AlignCenter, AlignLeft, AlignRight,
-  Layers, Check
+  Sparkles, Sliders, AlignCenter, AlignLeft, AlignRight,
+  Layers, Check, Loader2
 } from "lucide-react"
 import { useEditorStore } from "@/stores/editorStore"
 import type { TextPosition, TextAlign } from "@/stores/editorStore"
@@ -133,14 +133,27 @@ export const CaptionEditorPanel: React.FC<CaptionEditorPanelProps> = ({
           </button>
         </div>
 
-        {/* Add Caption Button */}
-        <button
-          onClick={() => addCaption(selectedCaptionId || undefined)}
-          className="flex items-center gap-1 px-3 py-1 bg-accent/15 hover:bg-accent/25 border border-accent/40 text-accent rounded-lg text-xs font-bold transition-all shadow-sm"
-        >
-          <Plus size={13} />
-          <span>Add Caption</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          {/* Auto Subtitles Transcribe Button */}
+          <button
+            onClick={onTranscribe}
+            disabled={isTranscribing}
+            className="flex items-center gap-1 px-2.5 py-1 bg-accent hover:bg-[#FFC425] text-black rounded-lg text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+            title="Transcribe full video with AI"
+          >
+            <Sparkles size={12} className={isTranscribing ? "animate-spin" : ""} />
+            <span>{isTranscribing ? "Transcribing..." : "Auto Subtitles"}</span>
+          </button>
+
+          {/* Add Caption Button */}
+          <button
+            onClick={() => addCaption(selectedCaptionId || undefined)}
+            className="flex items-center gap-1 px-2.5 py-1 bg-accent/15 hover:bg-accent/25 border border-accent/40 text-accent rounded-lg text-xs font-bold transition-all shadow-sm"
+          >
+            <Plus size={12} />
+            <span>+ Line</span>
+          </button>
+        </div>
       </div>
 
       {/* Caption Settings Expandable Section */}
@@ -316,21 +329,46 @@ export const CaptionEditorPanel: React.FC<CaptionEditorPanelProps> = ({
 
       {/* Captions List (Independently Scrollable) */}
       <div className="flex-1 overflow-y-auto p-3.5 space-y-3">
+        {/* Real-time speech detection / transcription progress banner */}
+        {isTranscribing && (
+          <div className="p-3 rounded-xl bg-[#231A08] border border-accent/50 text-accent flex items-center gap-3 text-xs shadow-lg animate-pulse">
+            <Loader2 size={18} className="animate-spin shrink-0 text-accent" />
+            <div className="flex-1 min-w-0">
+              <span className="font-extrabold text-white block text-xs">Transcribing Speech...</span>
+              <span className="text-[11px] text-[#D4D4D8] truncate block">
+                {transcribeProgress || "Analyzing audio speech & timestamps..."}
+              </span>
+            </div>
+          </div>
+        )}
+
         {captions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center text-text-muted space-y-3">
-            <Type size={32} className="opacity-40" />
+          <div className="flex flex-col items-center justify-center py-16 text-center text-text-muted space-y-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-[#1A1A22] border border-[#2B2B38] flex items-center justify-center text-accent">
+              <Sparkles size={24} />
+            </div>
             <div>
-              <p className="text-sm font-semibold text-text-secondary">No Captions Yet</p>
-              <p className="text-xs max-w-xs mt-1">
-                Click "+ Add Caption" to create a new caption card, or click "Generate" to transcribe audio.
+              <p className="text-sm font-bold text-white">No Captions Yet</p>
+              <p className="text-xs text-[#8E8E98] max-w-xs mt-1">
+                Click "Generate Captions" to auto-transcribe spoken speech with AI, or add lines manually.
               </p>
             </div>
-            <button
-              onClick={() => addCaption()}
-              className="px-3 py-1.5 bg-accent/20 hover:bg-accent/30 text-accent border border-accent/40 rounded-lg text-xs font-bold transition-colors"
-            >
-              + Create First Caption
-            </button>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={onTranscribe}
+                disabled={isTranscribing}
+                className="px-4 py-2 bg-accent hover:bg-[#FFC425] text-black rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md active:scale-95 disabled:opacity-50"
+              >
+                <Sparkles size={13} className={isTranscribing ? "animate-spin" : ""} />
+                <span>{isTranscribing ? "Transcribing..." : "Generate Captions"}</span>
+              </button>
+              <button
+                onClick={() => addCaption()}
+                className="px-3.5 py-2 bg-[#1A1A22] hover:bg-[#242430] text-[#D4D4D8] border border-[#2E2E3E] rounded-xl text-xs font-semibold transition-all active:scale-95"
+              >
+                + Manual Line
+              </button>
+            </div>
           </div>
         ) : (
           captions.map((cap, idx) => (

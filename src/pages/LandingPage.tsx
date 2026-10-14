@@ -8,7 +8,7 @@ export default function LandingPage() {
   const navigate = useNavigate()
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { setVideo } = useEditorStore()
+  const { loadNewVideo } = useEditorStore()
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -30,13 +30,7 @@ export default function LandingPage() {
       return
     }
 
-    const url = URL.createObjectURL(file)
-    
-    // We will extract duration and dimensions once the video loads in the editor
-    setVideo({
-      file,
-      url,
-    })
+    loadNewVideo(file)
     navigate("/editor")
   }
 

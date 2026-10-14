@@ -1,4 +1,4 @@
-const API_BASE = "http://localhost:8080/api";
+const API_BASE = "/api";
 
 export async function uploadVideo(file: File) {
   const formData = new FormData();

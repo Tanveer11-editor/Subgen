@@ -27,9 +27,12 @@ export interface VideoMetadata {
 export type OutputMode = 'tanglish' | 'tamil' | 'english';
 export type SourceLanguage = 'auto' | 'ta' | 'en';
 export type CaptionLayout = 'one-line' | 'two-line';
-export type AspectRatio = '9:16' | '16:9' | '1:1' | '4:5';
+export type CaptionDisplayMode = 'word' | 'line';
+export type AspectRatio = '9:16' | '16:9' | '1:1' | '4:5' | 'original';
 export type TextPosition = 'top' | 'middle' | 'bottom' | 'custom';
 export type TextAlign = 'left' | 'center' | 'right';
+export type ActiveTool = 'select' | 'blade';
+export type PauseMode = 'keep' | 'natural' | 'tight';
 
 export interface Preset {
   id: string;
@@ -49,18 +52,37 @@ export interface Preset {
   isUppercase: boolean;
 }
 
-interface EditorState {
+export interface EditorState {
   video: VideoMetadata;
   captions: CaptionSegment[];
   currentTime: number;
   isPlaying: boolean;
+  isReversing: boolean;
+  playbackSpeed: number;
+  volume: number;
+  isMuted: boolean;
+
+  // Project Info & Top Bar
+  projectTitle: string;
+  resolution: '1080p' | '720p';
+  hasWatermark: boolean;
+
+  // Trimming & Timeline
+  trimStart: number;
+  trimEnd: number;
+  activeTool: ActiveTool;
+  captionDisplayMode: CaptionDisplayMode;
+  pauseMode: PauseMode;
+  timelineZoom: number;
+
+  // Tabs & Templates
   activeTab: 'templates' | 'customize' | 'text';
   activeTemplate: string;
   templateCategory: 'templates' | 'presets';
   templateSearchQuery: string;
   bannerDismissed: boolean;
   userPresets: Preset[];
-  
+
   // Settings & styling
   outputMode: OutputMode;
   sourceLanguage: SourceLanguage;
@@ -79,33 +101,57 @@ interface EditorState {
   textPositionX: number;
   textPositionY: number;
   textAlign: TextAlign;
-  playbackSpeed: number;
-  volume: number;
-  isMuted: boolean;
   linesCount: 1 | 2;
   captionSettingsOpen: boolean;
-  
+
   // Selection
   selectedCaptionId: string | null;
   selectedWordId: string | null;
-  
+
   // History & dirty state
   hasUnsavedEdits: boolean;
   history: CaptionSegment[][];
   historyIndex: number;
-  
+
   // Actions
   setVideo: (video: Partial<VideoMetadata>) => void;
   setCaptions: (captions: CaptionSegment[], resetHistory?: boolean) => void;
   updateCaption: (id: string, updates: Partial<CaptionSegment>) => void;
   updateWord: (segmentId: string, wordId: string, updates: Partial<Word>) => void;
-  addCaption: (afterId?: string) => void;
-  deleteCaption: (id: string) => void;
+  updateWordTiming: (segmentId: string, wordId: string, newStart: number, newEnd: number) => void;
+  shiftWord: (segmentId: string, wordId: string, deltaSeconds: number) => void;
+  splitAtPlayhead: (time?: number) => void;
   splitCaptionAtWord: (segmentId: string, wordId: string) => void;
   mergeCaptions: (segmentId1: string, segmentId2: string) => void;
-  
+  addCaption: (afterId?: string) => void;
+  deleteCaption: (id: string) => void;
+  deleteWord: (segmentId: string, wordId: string) => void;
+
+  // Player & Shuttle controls
   setCurrentTime: (time: number) => void;
   setIsPlaying: (playing: boolean) => void;
+  setIsReversing: (reversing: boolean) => void;
+  setPlaybackSpeed: (speed: number) => void;
+  cycleForwardSpeed: () => void;
+  startReversePlayback: () => void;
+  stopPlayback: () => void;
+  togglePlayPause: () => void;
+
+  // Trimming & Tools
+  setTrimStart: (start: number) => void;
+  setTrimEnd: (end: number) => void;
+  setTrimRange: (start: number, end: number) => void;
+  setActiveTool: (tool: ActiveTool) => void;
+  setCaptionDisplayMode: (mode: CaptionDisplayMode) => void;
+  setPauseMode: (mode: PauseMode) => void;
+  setTimelineZoom: (zoom: number) => void;
+
+  // Project details
+  setProjectTitle: (title: string) => void;
+  setResolution: (res: '1080p' | '720p') => void;
+  setHasWatermark: (val: boolean) => void;
+
+  // Panels & Styling
   setActiveTab: (tab: 'templates' | 'customize' | 'text') => void;
   setActiveTemplate: (template: string) => void;
   setTemplateCategory: (category: 'templates' | 'presets') => void;
@@ -119,7 +165,7 @@ interface EditorState {
   saveCurrentAsPreset: (name: string) => void;
   deletePreset: (id: string) => void;
   applyPreset: (preset: Preset) => void;
-  
+
   setOutputMode: (mode: OutputMode) => void;
   setSourceLanguage: (lang: SourceLanguage) => void;
   setMaxWordsPerCaption: (count: number) => void;
@@ -133,22 +179,26 @@ interface EditorState {
   setTextPositionX: (x: number) => void;
   setTextPositionY: (y: number) => void;
   setTextAlign: (align: TextAlign) => void;
-  setPlaybackSpeed: (speed: number) => void;
   setVolume: (vol: number) => void;
   setIsMuted: (muted: boolean) => void;
   setLinesCount: (lines: 1 | 2) => void;
   toggleCaptionSettings: () => void;
-  
+
   setSelectedCaptionId: (id: string | null) => void;
   setSelectedWordId: (id: string | null) => void;
-  
+
+  // Auto-generation & new video handling
+  needsTranscription: boolean;
+  setNeedsTranscription: (needs: boolean) => void;
+  loadNewVideo: (file: File) => void;
+
   undo: () => void;
   redo: () => void;
   markSaved: () => void;
   clearProject: () => void;
 }
 
-const MAX_HISTORY = 30;
+const MAX_HISTORY = 40;
 
 function pushStateToHistory(history: CaptionSegment[][], historyIndex: number, current: CaptionSegment[]) {
   const truncated = history.slice(0, historyIndex + 1);
@@ -158,21 +208,205 @@ function pushStateToHistory(history: CaptionSegment[][], historyIndex: number, c
   }
   return {
     history: updated,
-    historyIndex: updated.length - 1
+    historyIndex: updated.length - 1,
   };
 }
+
+// Sample initial Tanglish captions matching the Captik screenshot
+const INITIAL_CAPTIONS: CaptionSegment[] = [
+  {
+    id: "cap-1",
+    start: 0.0,
+    end: 1.8,
+    text: "Present sir attendance",
+    words: [
+      { id: "w-1", text: "Present", start: 0.0, end: 0.6, segmentId: "cap-1" },
+      { id: "w-2", text: "sir", start: 0.6, end: 1.1, segmentId: "cap-1" },
+      { id: "w-3", text: "attendance", start: 1.1, end: 1.8, segmentId: "cap-1" }
+    ]
+  },
+  {
+    id: "cap-2",
+    start: 1.8,
+    end: 3.4,
+    text: "Yashika attendance sollu",
+    words: [
+      { id: "w-4", text: "Yashika", start: 1.8, end: 2.4, segmentId: "cap-2" },
+      { id: "w-5", text: "attendance", start: 2.4, end: 2.9, segmentId: "cap-2" },
+      { id: "w-6", text: "sollu", start: 2.9, end: 3.4, segmentId: "cap-2" }
+    ]
+  },
+  {
+    id: "cap-3",
+    start: 3.4,
+    end: 4.8,
+    text: "so aayiruchu attendance",
+    words: [
+      { id: "w-7", text: "so", start: 3.4, end: 3.7, segmentId: "cap-3" },
+      { id: "w-8", text: "aayiruchu", start: 3.7, end: 4.2, segmentId: "cap-3" },
+      { id: "w-9", text: "attendance", start: 4.2, end: 4.8, segmentId: "cap-3" }
+    ]
+  },
+  {
+    id: "cap-4",
+    start: 4.8,
+    end: 6.4,
+    text: "1 period-e mudinjiduchu",
+    words: [
+      { id: "w-10", text: "1", start: 4.8, end: 5.1, segmentId: "cap-4" },
+      { id: "w-11", text: "period-e", start: 5.1, end: 5.7, segmentId: "cap-4" },
+      { id: "w-12", text: "mudinjiduchu", start: 5.7, end: 6.4, segmentId: "cap-4" }
+    ]
+  },
+  {
+    id: "cap-5",
+    start: 6.4,
+    end: 7.9,
+    text: "la Appa idhukku",
+    words: [
+      { id: "w-13", text: "la", start: 6.4, end: 6.8, segmentId: "cap-5" },
+      { id: "w-14", text: "Appa", start: 6.8, end: 7.3, segmentId: "cap-5" },
+      { id: "w-15", text: "idhukku", start: 7.3, end: 7.9, segmentId: "cap-5" }
+    ]
+  },
+  {
+    id: "cap-6",
+    start: 7.9,
+    end: 8.8,
+    text: "period-e murundundhu",
+    words: [
+      { id: "w-16", text: "period-e", start: 7.9, end: 8.3, segmentId: "cap-6" },
+      { id: "w-17", text: "murundundhu", start: 8.3, end: 8.8, segmentId: "cap-6" }
+    ]
+  },
+  {
+    id: "cap-7",
+    start: 8.8,
+    end: 9.3,
+    text: "la Appa idhukku",
+    words: [
+      { id: "w-18", text: "la", start: 8.8, end: 8.95, segmentId: "cap-7" },
+      { id: "w-19", text: "Appa", start: 8.95, end: 9.15, segmentId: "cap-7" },
+      { id: "w-20", text: "idhukku", start: 9.15, end: 9.3, segmentId: "cap-7" }
+    ]
+  },
+  {
+    id: "cap-8",
+    start: 9.3,
+    end: 9.6,
+    text: "solution think pannaa",
+    words: [
+      { id: "w-21", text: "solution", start: 9.3, end: 9.4, segmentId: "cap-8" },
+      { id: "w-22", text: "think", start: 9.4, end: 9.5, segmentId: "cap-8" },
+      { id: "w-23", text: "pannaa", start: 9.5, end: 9.6, segmentId: "cap-8" }
+    ]
+  },
+  {
+    id: "cap-9",
+    start: 9.6,
+    end: 10.1,
+    text: "nalaa aapne",
+    words: [
+      { id: "w-24", text: "nalaa", start: 9.6, end: 9.85, segmentId: "cap-9" },
+      { id: "w-25", text: "aapne", start: 9.85, end: 10.1, segmentId: "cap-9" }
+    ]
+  },
+  {
+    id: "cap-10",
+    start: 10.4,
+    end: 11.5,
+    text: "Nammama students thana",
+    words: [
+      { id: "w-26", text: "Nammama", start: 10.4, end: 10.75, segmentId: "cap-10" },
+      { id: "w-27", text: "students", start: 10.75, end: 11.15, segmentId: "cap-10" },
+      { id: "w-28", text: "thana", start: 11.15, end: 11.5, segmentId: "cap-10" }
+    ]
+  },
+  {
+    id: "cap-11",
+    start: 11.5,
+    end: 12.5,
+    text: "namli idhukkula solution",
+    words: [
+      { id: "w-29", text: "namli", start: 11.5, end: 11.8, segmentId: "cap-11" },
+      { id: "w-30", text: "idhukkula", start: 11.8, end: 12.15, segmentId: "cap-11" },
+      { id: "w-31", text: "solution", start: 12.15, end: 12.5, segmentId: "cap-11" }
+    ]
+  },
+  {
+    id: "cap-12",
+    start: 12.6,
+    end: 13.4,
+    text: "find pannaa na",
+    words: [
+      { id: "w-32", text: "find", start: 12.6, end: 12.85, segmentId: "cap-12" },
+      { id: "w-33", text: "pannaa", start: 12.85, end: 13.15, segmentId: "cap-12" },
+      { id: "w-34", text: "na", start: 13.15, end: 13.4, segmentId: "cap-12" }
+    ]
+  },
+  {
+    id: "cap-13",
+    start: 13.5,
+    end: 14.8,
+    text: "Maybe automatic attendance",
+    words: [
+      { id: "w-35", text: "Maybe", start: 13.5, end: 14.1, segmentId: "cap-13" },
+      { id: "w-36", text: "automatic", start: 14.1, end: 14.8, segmentId: "cap-13" }
+    ]
+  },
+  {
+    id: "cap-14",
+    start: 14.8,
+    end: 15.8,
+    text: "attendance illa",
+    words: [
+      { id: "w-37", text: "attendance", start: 14.8, end: 15.3, segmentId: "cap-14" },
+      { id: "w-38", text: "illa", start: 15.3, end: 15.8, segmentId: "cap-14" }
+    ]
+  },
+  {
+    id: "cap-15",
+    start: 15.8,
+    end: 17.5,
+    text: "biometric Illa Bio",
+    words: [
+      { id: "w-39", text: "biometric", start: 15.8, end: 16.35, segmentId: "cap-15" },
+      { id: "w-40", text: "Illa", start: 16.35, end: 16.7, segmentId: "cap-15" },
+      { id: "w-41", text: "Bio", start: 16.7, end: 17.5, segmentId: "cap-15" }
+    ]
+  }
+];
 
 export const useEditorStore = create<EditorState>((set, get) => ({
   video: {
     file: null,
-    url: null,
-    duration: 0,
-    width: 0,
-    height: 0,
+    url: "/demo_video.mp4",
+    duration: 13.2,
+    width: 1080,
+    height: 1920,
   },
-  captions: [],
+  captions: INITIAL_CAPTIONS,
   currentTime: 0,
   isPlaying: false,
+  isReversing: false,
+  playbackSpeed: 1.0,
+  volume: 1.0,
+  isMuted: false,
+
+  // Project Info
+  projectTitle: "AQM1CbKLwHZlzkYqFL2wkYc",
+  resolution: "1080p",
+  hasWatermark: false,
+
+  // Trimming & Tools
+  trimStart: 0,
+  trimEnd: 13.2,
+  activeTool: "select",
+  captionDisplayMode: "line",
+  pauseMode: "keep",
+  timelineZoom: 1.0,
+
+  // Panels & styling
   activeTab: 'templates',
   activeTemplate: 'Captik Glow',
   templateCategory: 'templates',
@@ -197,8 +431,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       isUppercase: false
     }
   ],
-  
-  outputMode: 'tanglish',       // DEFAULT: Tanglish
+
+  outputMode: 'tanglish',
   sourceLanguage: 'auto',
   maxWordsPerCaption: 5,
   captionLayout: 'one-line',
@@ -215,23 +449,74 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   textPositionX: 50,
   textPositionY: 80,
   textAlign: 'center',
-  playbackSpeed: 1,
-  volume: 1,
-  isMuted: false,
   linesCount: 1,
   captionSettingsOpen: false,
-  
-  selectedCaptionId: null,
-  selectedWordId: null,
-  
+
+  selectedCaptionId: "cap-7",
+  selectedWordId: "w-19",
+
   hasUnsavedEdits: false,
-  history: [[]],
+  history: [JSON.parse(JSON.stringify(INITIAL_CAPTIONS))],
   historyIndex: 0,
 
-  setVideo: (videoUpdates) => set((state) => ({ 
-    video: { ...state.video, ...videoUpdates } 
-  })),
-  
+  needsTranscription: false,
+  setNeedsTranscription: (needs) => set({ needsTranscription: needs }),
+
+  loadNewVideo: (file: File) => {
+    const url = URL.createObjectURL(file);
+    const title = file.name.replace(/\.[^/.]+$/, "") || "Untitled Video";
+    set({
+      video: {
+        file,
+        url,
+        duration: 0,
+        width: 1080,
+        height: 1920,
+      },
+      captions: [],
+      history: [[]],
+      historyIndex: 0,
+      hasUnsavedEdits: false,
+      currentTime: 0,
+      trimStart: 0,
+      trimEnd: 0,
+      projectTitle: title,
+      selectedCaptionId: null,
+      selectedWordId: null,
+      needsTranscription: true,
+      isPlaying: false,
+      isReversing: false,
+    });
+  },
+
+  setVideo: (videoUpdates) => set((state) => {
+    const isNewFile = Boolean(videoUpdates.file && videoUpdates.file !== state.video.file);
+    const updated = { ...state.video, ...videoUpdates };
+    if (isNewFile) {
+      const title = videoUpdates.file?.name ? videoUpdates.file.name.replace(/\.[^/.]+$/, "") : state.projectTitle;
+      return {
+        video: updated,
+        captions: [],
+        history: [[]],
+        historyIndex: 0,
+        hasUnsavedEdits: false,
+        currentTime: 0,
+        trimStart: 0,
+        trimEnd: updated.duration || 0,
+        projectTitle: title,
+        selectedCaptionId: null,
+        selectedWordId: null,
+        needsTranscription: true,
+        isPlaying: false,
+        isReversing: false,
+      };
+    }
+    return {
+      video: updated,
+      trimEnd: (state.trimEnd === 13.2 || state.trimEnd === 0) && updated.duration ? updated.duration : state.trimEnd
+    };
+  }),
+
   setCaptions: (captions, resetHistory = false) => {
     if (resetHistory) {
       set({
@@ -250,16 +535,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       });
     }
   },
-  
+
   updateCaption: (id, updates) => {
     const { captions, history, historyIndex } = get();
     const updatedCaptions = captions.map((cap) => {
       if (cap.id !== id) return cap;
-      const merged = { ...cap, ...updates };
-      // If text changed directly without words edit, update text
-      return merged;
+      return { ...cap, ...updates };
     });
-    
+
     const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
     set({
       captions: updatedCaptions,
@@ -267,19 +550,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...nextHistory
     });
   },
-  
+
   updateWord: (segmentId, wordId, updates) => {
     const { captions, history, historyIndex } = get();
     const updatedCaptions = captions.map((cap) => {
       if (cap.id !== segmentId) return cap;
-      const updatedWords = (cap.words || []).map((w) => 
+      const updatedWords = (cap.words || []).map((w) =>
         w.id === wordId ? { ...w, ...updates } : w
       );
-      // Recalculate segment text and bounds from updated words
       const fullText = updatedWords.map((w) => w.text).join(' ');
       const newStart = updatedWords.length ? Math.min(...updatedWords.map(w => w.start)) : cap.start;
       const newEnd = updatedWords.length ? Math.max(...updatedWords.map(w => w.end)) : cap.end;
-      
+
       return {
         ...cap,
         words: updatedWords,
@@ -288,7 +570,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         end: Number(newEnd.toFixed(2))
       };
     });
-    
+
     const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
     set({
       captions: updatedCaptions,
@@ -296,23 +578,296 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...nextHistory
     });
   },
-  
+
+  updateWordTiming: (segmentId, wordId, newStart, newEnd) => {
+    const { captions, history, historyIndex } = get();
+    const cleanStart = Number(Math.max(0, newStart).toFixed(2));
+    const cleanEnd = Number(Math.max(cleanStart + 0.05, newEnd).toFixed(2));
+
+    const updatedCaptions = captions.map((cap) => {
+      if (cap.id !== segmentId) return cap;
+
+      const updatedWords = (cap.words || []).map((w) => {
+        if (w.id === wordId) {
+          return { ...w, start: cleanStart, end: cleanEnd };
+        }
+        return w;
+      });
+
+      // Recalculate segment bounds
+      const minStart = Math.min(...updatedWords.map(w => w.start));
+      const maxEnd = Math.max(...updatedWords.map(w => w.end));
+
+      return {
+        ...cap,
+        words: updatedWords,
+        start: Number(minStart.toFixed(2)),
+        end: Number(maxEnd.toFixed(2))
+      };
+    }).sort((a, b) => a.start - b.start);
+
+    const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
+    set({
+      captions: updatedCaptions,
+      hasUnsavedEdits: true,
+      ...nextHistory
+    });
+  },
+
+  shiftWord: (segmentId, wordId, deltaSeconds) => {
+    const { captions, history, historyIndex } = get();
+    const updatedCaptions = captions.map((cap) => {
+      if (cap.id !== segmentId) return cap;
+      const updatedWords = (cap.words || []).map((w) => {
+        if (w.id === wordId) {
+          const dur = w.end - w.start;
+          const s = Math.max(0, Number((w.start + deltaSeconds).toFixed(2)));
+          const e = Number((s + dur).toFixed(2));
+          return { ...w, start: s, end: e };
+        }
+        return w;
+      });
+      const minStart = Math.min(...updatedWords.map(w => w.start));
+      const maxEnd = Math.max(...updatedWords.map(w => w.end));
+      return {
+        ...cap,
+        words: updatedWords,
+        start: Number(minStart.toFixed(2)),
+        end: Number(maxEnd.toFixed(2))
+      };
+    });
+
+    const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
+    set({
+      captions: updatedCaptions,
+      hasUnsavedEdits: true,
+      ...nextHistory
+    });
+  },
+
+  splitAtPlayhead: (time) => {
+    const { captions, currentTime, history, historyIndex } = get();
+    const splitTime = typeof time === 'number' ? time : currentTime;
+
+    // Find the caption containing this time
+    const capIdx = captions.findIndex(c => splitTime >= c.start && splitTime <= c.end);
+    if (capIdx === -1) return;
+
+    const cap = captions[capIdx];
+    if (!cap.words || cap.words.length <= 1) {
+      // Split single text caption at time midpoint
+      const mid = splitTime;
+      const firstCap: CaptionSegment = {
+        id: `cap-${Date.now()}-a`,
+        start: cap.start,
+        end: mid,
+        text: cap.text.substring(0, Math.ceil(cap.text.length / 2)).trim() || cap.text,
+        words: [
+          {
+            id: `w-${Date.now()}-a`,
+            text: cap.text.substring(0, Math.ceil(cap.text.length / 2)).trim() || cap.text,
+            start: cap.start,
+            end: mid,
+            segmentId: `cap-${Date.now()}-a`
+          }
+        ]
+      };
+      const secondCap: CaptionSegment = {
+        id: `cap-${Date.now()}-b`,
+        start: mid,
+        end: cap.end,
+        text: cap.text.substring(Math.ceil(cap.text.length / 2)).trim() || "...",
+        words: [
+          {
+            id: `w-${Date.now()}-b`,
+            text: cap.text.substring(Math.ceil(cap.text.length / 2)).trim() || "...",
+            start: mid,
+            end: cap.end,
+            segmentId: `cap-${Date.now()}-b`
+          }
+        ]
+      };
+
+      const updatedCaptions = [
+        ...captions.slice(0, capIdx),
+        firstCap,
+        secondCap,
+        ...captions.slice(capIdx + 1)
+      ];
+
+      const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
+      set({
+        captions: updatedCaptions,
+        selectedCaptionId: secondCap.id,
+        hasUnsavedEdits: true,
+        ...nextHistory
+      });
+      return;
+    }
+
+    // Split caption based on words
+    const wordsBefore = cap.words.filter(w => w.end <= splitTime || (w.start < splitTime && (splitTime - w.start >= (w.end - w.start)/2)));
+    const wordsAfter = cap.words.filter(w => !wordsBefore.includes(w));
+
+    if (wordsBefore.length === 0 || wordsAfter.length === 0) {
+      // Split between first word and remainder
+      const firstW = cap.words.slice(0, 1);
+      const restW = cap.words.slice(1);
+      const newSegId = `seg-${Date.now()}`;
+
+      const firstSeg: CaptionSegment = {
+        id: cap.id,
+        start: firstW[0].start,
+        end: firstW[firstW.length - 1].end,
+        text: firstW.map(w => w.text).join(' '),
+        words: firstW
+      };
+      const secondSeg: CaptionSegment = {
+        id: newSegId,
+        start: restW[0].start,
+        end: restW[restW.length - 1].end,
+        text: restW.map(w => w.text).join(' '),
+        words: restW.map(w => ({ ...w, segmentId: newSegId }))
+      };
+      const updatedCaptions = [
+        ...captions.slice(0, capIdx),
+        firstSeg,
+        secondSeg,
+        ...captions.slice(capIdx + 1)
+      ];
+      const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
+      set({ captions: updatedCaptions, selectedCaptionId: newSegId, hasUnsavedEdits: true, ...nextHistory });
+      return;
+    }
+
+    const newSegId = `seg-${Date.now()}`;
+    const firstSeg: CaptionSegment = {
+      id: cap.id,
+      start: wordsBefore[0].start,
+      end: wordsBefore[wordsBefore.length - 1].end,
+      text: wordsBefore.map(w => w.text).join(' '),
+      words: wordsBefore
+    };
+    const secondSeg: CaptionSegment = {
+      id: newSegId,
+      start: wordsAfter[0].start,
+      end: wordsAfter[wordsAfter.length - 1].end,
+      text: wordsAfter.map(w => w.text).join(' '),
+      words: wordsAfter.map(w => ({ ...w, segmentId: newSegId }))
+    };
+
+    const updatedCaptions = [
+      ...captions.slice(0, capIdx),
+      firstSeg,
+      secondSeg,
+      ...captions.slice(capIdx + 1)
+    ];
+
+    const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
+    set({
+      captions: updatedCaptions,
+      selectedCaptionId: newSegId,
+      hasUnsavedEdits: true,
+      ...nextHistory
+    });
+  },
+
+  splitCaptionAtWord: (segmentId, wordId) => {
+    const { captions, history, historyIndex } = get();
+    const segIdx = captions.findIndex(c => c.id === segmentId);
+    if (segIdx === -1) return;
+
+    const seg = captions[segIdx];
+    const wordIdx = (seg.words || []).findIndex(w => w.id === wordId);
+    if (wordIdx <= 0) return;
+
+    const firstWords = seg.words.slice(0, wordIdx);
+    const secondWordsRaw = seg.words.slice(wordIdx);
+
+    const newSegId = `seg-${Date.now()}`;
+    const secondWords = secondWordsRaw.map(w => ({ ...w, segmentId: newSegId }));
+
+    const firstSeg: CaptionSegment = {
+      id: seg.id,
+      start: firstWords[0].start,
+      end: firstWords[firstWords.length - 1].end,
+      text: firstWords.map(w => w.text).join(' '),
+      words: firstWords
+    };
+
+    const secondSeg: CaptionSegment = {
+      id: newSegId,
+      start: secondWords[0].start,
+      end: secondWords[secondWords.length - 1].end,
+      text: secondWords.map(w => w.text).join(' '),
+      words: secondWords
+    };
+
+    const updatedCaptions = [
+      ...captions.slice(0, segIdx),
+      firstSeg,
+      secondSeg,
+      ...captions.slice(segIdx + 1)
+    ];
+
+    const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
+    set({
+      captions: updatedCaptions,
+      selectedCaptionId: newSegId,
+      hasUnsavedEdits: true,
+      ...nextHistory
+    });
+  },
+
+  mergeCaptions: (segmentId1, segmentId2) => {
+    const { captions, history, historyIndex } = get();
+    const seg1 = captions.find(c => c.id === segmentId1);
+    const seg2 = captions.find(c => c.id === segmentId2);
+    if (!seg1 || !seg2) return;
+
+    const combinedWords = [
+      ...(seg1.words || []),
+      ...(seg2.words || []).map(w => ({ ...w, segmentId: seg1.id }))
+    ];
+
+    const mergedSeg: CaptionSegment = {
+      id: seg1.id,
+      start: Math.min(seg1.start, seg2.start),
+      end: Math.max(seg1.end, seg2.end),
+      text: combinedWords.map(w => w.text).join(' '),
+      words: combinedWords
+    };
+
+    const updatedCaptions = captions
+      .filter(c => c.id !== segmentId2)
+      .map(c => c.id === seg1.id ? mergedSeg : c)
+      .sort((a, b) => a.start - b.start);
+
+    const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
+    set({
+      captions: updatedCaptions,
+      selectedCaptionId: seg1.id,
+      hasUnsavedEdits: true,
+      ...nextHistory
+    });
+  },
+
   addCaption: (afterId) => {
     const { captions, currentTime, history, historyIndex } = get();
-    const newId = `segment-${Math.random().toString(36).substring(2, 8)}`;
-    const wordId = `word-${Math.random().toString(36).substring(2, 8)}`;
-    
+    const newId = `seg-${Date.now()}`;
+    const wordId = `w-${Date.now()}`;
+
     let startTime = currentTime;
-    let endTime = Number((currentTime + 2.0).toFixed(2));
-    
+    let endTime = Number((currentTime + 1.8).toFixed(2));
+
     if (afterId) {
       const idx = captions.findIndex(c => c.id === afterId);
       if (idx !== -1) {
-        startTime = Number((captions[idx].end + 0.1).toFixed(2));
-        endTime = Number((startTime + 2.0).toFixed(2));
+        startTime = Number((captions[idx].end + 0.05).toFixed(2));
+        endTime = Number((startTime + 1.8).toFixed(2));
       }
     }
-    
+
     const newCaption: CaptionSegment = {
       id: newId,
       start: startTime,
@@ -320,10 +875,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       text: "New caption",
       words: [
         { id: wordId, text: "New", start: startTime, end: Number((startTime + 0.8).toFixed(2)), segmentId: newId },
-        { id: `word-${Math.random().toString(36).substring(2, 8)}`, text: "caption", start: Number((startTime + 0.8).toFixed(2)), end: endTime, segmentId: newId }
+        { id: `w-${Date.now()}-2`, text: "caption", start: Number((startTime + 0.8).toFixed(2)), end: endTime, segmentId: newId }
       ]
     };
-    
+
     let updatedCaptions: CaptionSegment[];
     if (afterId) {
       const idx = captions.findIndex(c => c.id === afterId);
@@ -335,7 +890,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     } else {
       updatedCaptions = [...captions, newCaption].sort((a, b) => a.start - b.start);
     }
-    
+
     const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
     set({
       captions: updatedCaptions,
@@ -344,7 +899,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...nextHistory
     });
   },
-  
+
   deleteCaption: (id) => {
     const { captions, history, historyIndex, selectedCaptionId } = get();
     const updatedCaptions = captions.filter(c => c.id !== id);
@@ -356,142 +911,95 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       ...nextHistory
     });
   },
-  
-  splitCaptionAtWord: (segmentId, wordId) => {
+
+  deleteWord: (segmentId, wordId) => {
     const { captions, history, historyIndex } = get();
-    const segIdx = captions.findIndex(c => c.id === segmentId);
-    if (segIdx === -1) return;
-    
-    const seg = captions[segIdx];
-    const wordIdx = (seg.words || []).findIndex(w => w.id === wordId);
-    if (wordIdx <= 0) return; // Cannot split before index 0
-    
-    const firstWords = seg.words.slice(0, wordIdx);
-    const secondWordsRaw = seg.words.slice(wordIdx);
-    
-    const newSegId = `segment-${Math.random().toString(36).substring(2, 8)}`;
-    const secondWords = secondWordsRaw.map(w => ({ ...w, segmentId: newSegId }));
-    
-    const firstSeg: CaptionSegment = {
-      id: seg.id,
-      start: firstWords[0].start,
-      end: firstWords[firstWords.length - 1].end,
-      text: firstWords.map(w => w.text).join(' '),
-      words: firstWords
-    };
-    
-    const secondSeg: CaptionSegment = {
-      id: newSegId,
-      start: secondWords[0].start,
-      end: secondWords[secondWords.length - 1].end,
-      text: secondWords.map(w => w.text).join(' '),
-      words: secondWords
-    };
-    
-    const updatedCaptions = [
-      ...captions.slice(0, segIdx),
-      firstSeg,
-      secondSeg,
-      ...captions.slice(segIdx + 1)
-    ];
-    
+    const updatedCaptions = captions.map((cap) => {
+      if (cap.id !== segmentId) return cap;
+      const remainingWords = (cap.words || []).filter(w => w.id !== wordId);
+      if (remainingWords.length === 0) return null;
+      return {
+        ...cap,
+        words: remainingWords,
+        text: remainingWords.map(w => w.text).join(' '),
+        start: remainingWords[0].start,
+        end: remainingWords[remainingWords.length - 1].end
+      };
+    }).filter(Boolean) as CaptionSegment[];
+
     const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
     set({
       captions: updatedCaptions,
-      selectedCaptionId: newSegId,
+      selectedWordId: null,
       hasUnsavedEdits: true,
       ...nextHistory
     });
   },
-  
-  mergeCaptions: (segmentId1, segmentId2) => {
-    const { captions, history, historyIndex } = get();
-    const seg1 = captions.find(c => c.id === segmentId1);
-    const seg2 = captions.find(c => c.id === segmentId2);
-    if (!seg1 || !seg2) return;
-    
-    const combinedWords = [
-      ...(seg1.words || []),
-      ...(seg2.words || []).map(w => ({ ...w, segmentId: seg1.id }))
-    ];
-    
-    const mergedSeg: CaptionSegment = {
-      id: seg1.id,
-      start: Math.min(seg1.start, seg2.start),
-      end: Math.max(seg1.end, seg2.end),
-      text: combinedWords.map(w => w.text).join(' '),
-      words: combinedWords
-    };
-    
-    const updatedCaptions = captions
-      .filter(c => c.id !== segmentId2)
-      .map(c => c.id === seg1.id ? mergedSeg : c)
-      .sort((a, b) => a.start - b.start);
-      
-    const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
-    set({
-      captions: updatedCaptions,
-      selectedCaptionId: seg1.id,
-      hasUnsavedEdits: true,
-      ...nextHistory
-    });
-  },
-  
-  undo: () => {
-    const { history, historyIndex } = get();
-    if (historyIndex > 0) {
-      const prevIndex = historyIndex - 1;
-      set({
-        captions: JSON.parse(JSON.stringify(history[prevIndex])),
-        historyIndex: prevIndex,
-        hasUnsavedEdits: true
-      });
+
+  // Player & Shuttle controls
+  setCurrentTime: (time) => set({ currentTime: Math.max(0, time) }),
+  setIsPlaying: (playing) => set({ isPlaying: playing, isReversing: false }),
+  setIsReversing: (reversing) => set({ isReversing: reversing, isPlaying: false }),
+  setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
+
+  cycleForwardSpeed: () => {
+    const { isPlaying, isReversing, playbackSpeed } = get();
+    if (isReversing) {
+      set({ isReversing: false, isPlaying: true, playbackSpeed: 1.0 });
+      return;
+    }
+    if (!isPlaying) {
+      set({ isPlaying: true, isReversing: false, playbackSpeed: 1.0 });
+      return;
+    }
+    // Already playing forward: cycle 1x -> 1.5x -> 2.0x -> 1x
+    if (playbackSpeed < 1.4) {
+      set({ playbackSpeed: 1.5 });
+    } else if (playbackSpeed < 1.9) {
+      set({ playbackSpeed: 2.0 });
+    } else {
+      set({ playbackSpeed: 1.0 });
     }
   },
-  
-  redo: () => {
-    const { history, historyIndex } = get();
-    if (historyIndex < history.length - 1) {
-      const nextIndex = historyIndex + 1;
-      set({
-        captions: JSON.parse(JSON.stringify(history[nextIndex])),
-        historyIndex: nextIndex,
-        hasUnsavedEdits: true
-      });
+
+  startReversePlayback: () => {
+    const { isReversing, playbackSpeed } = get();
+    if (!isReversing) {
+      set({ isReversing: true, isPlaying: false, playbackSpeed: 1.0 });
+    } else {
+      // Toggle reverse speed: 1.0x <-> 2.0x
+      set({ playbackSpeed: playbackSpeed === 1.0 ? 2.0 : 1.0 });
     }
   },
-  
-  markSaved: () => set({ hasUnsavedEdits: false }),
-  
-  setCurrentTime: (time) => set({ currentTime: time }),
-  setIsPlaying: (playing) => set({ isPlaying: playing }),
+
+  stopPlayback: () => set({ isPlaying: false, isReversing: false }),
+
+  togglePlayPause: () => {
+    const { isPlaying, isReversing } = get();
+    if (isPlaying || isReversing) {
+      set({ isPlaying: false, isReversing: false });
+    } else {
+      set({ isPlaying: true, isReversing: false, playbackSpeed: 1.0 });
+    }
+  },
+
+  // Trimming & Tools
+  setTrimStart: (start) => set((s) => ({ trimStart: Math.max(0, Math.min(s.trimEnd - 0.5, start)) })),
+  setTrimEnd: (end) => set((s) => ({ trimEnd: Math.max(s.trimStart + 0.5, end) })),
+  setTrimRange: (start, end) => set({ trimStart: Math.max(0, start), trimEnd: Math.max(start + 0.5, end) }),
+  setActiveTool: (tool) => set({ activeTool: tool }),
+  setCaptionDisplayMode: (mode) => set({ captionDisplayMode: mode }),
+  setPauseMode: (mode) => set({ pauseMode: mode }),
+  setTimelineZoom: (zoom) => set({ timelineZoom: Math.max(0.5, Math.min(3.0, zoom)) }),
+
+  // Project Info
+  setProjectTitle: (title) => set({ projectTitle: title }),
+  setResolution: (res) => set({ resolution: res }),
+  setHasWatermark: (val) => set({ hasWatermark: val }),
+
+  // Panels & Styling
   setActiveTab: (tab) => set({ activeTab: tab }),
-  setActiveTemplate: (template) => {
-    let updates: Partial<EditorState> = { activeTemplate: template };
-    if (template === 'Captik Glow') {
-      updates = { ...updates, fontFamily: 'Outfit', textColor: '#FFFFFF', activeHighlightColor: '#FFB800', textShadow: '0 0 16px rgba(255, 184, 0, 0.9)', textStroke: 'none', isUppercase: false, textBg: 'transparent' };
-    } else if (template === 'Captik Shadow') {
-      updates = { ...updates, fontFamily: 'Montserrat', textColor: '#FFFFFF', activeHighlightColor: '#FFC526', textShadow: '0 6px 12px rgba(0, 0, 0, 0.95)', textStroke: '1.5px rgba(0,0,0,0.8)', isUppercase: false, textBg: 'transparent' };
-    } else if (template === 'Scribble') {
-      updates = { ...updates, fontFamily: "'Caveat', cursive", textColor: '#FFFFFF', activeHighlightColor: '#FFD600', textShadow: '0 2px 8px rgba(0, 0, 0, 0.8)', textStroke: 'none', isUppercase: false, textBg: 'transparent' };
-    } else if (template === 'Archives') {
-      updates = { ...updates, fontFamily: 'Inter', textColor: '#F3F4F6', activeHighlightColor: '#E5E7EB', textShadow: 'none', textStroke: 'none', isUppercase: true, textBg: 'rgba(0, 0, 0, 0.75)' };
-    } else if (template === 'Karaoke Pop' || template === 'Karaoke') {
-      updates = { ...updates, fontFamily: 'Outfit', textColor: '#FFFFFF', activeHighlightColor: '#FFB800', textShadow: '0 0 14px rgba(255, 184, 0, 0.8)', textStroke: 'none', isUppercase: false, textBg: 'transparent' };
-    } else if (template === 'Bold Punch' || template === 'Bold') {
-      updates = { ...updates, fontFamily: "'Anton', sans-serif", textColor: '#FFB800', activeHighlightColor: '#FFFFFF', textShadow: '0 4px 6px rgba(0, 0, 0, 0.9)', textStroke: '2px black', isUppercase: true, textBg: 'transparent' };
-    } else if (template === 'Clean Minimal' || template === 'Clean') {
-      updates = { ...updates, fontFamily: 'Inter', textColor: '#FFFFFF', activeHighlightColor: '#FFB800', textShadow: '0 2px 6px rgba(0, 0, 0, 0.6)', textStroke: 'none', isUppercase: false, textBg: 'rgba(0, 0, 0, 0.45)' };
-    } else if (template === 'Neon Cyber') {
-      updates = { ...updates, fontFamily: 'Montserrat', textColor: '#00F0FF', activeHighlightColor: '#FFE600', textShadow: '0 0 18px rgba(0, 240, 255, 0.85)', textStroke: 'none', isUppercase: true, textBg: 'transparent' };
-    } else if (template === 'Impact Meme' || template === 'Meme') {
-      updates = { ...updates, fontFamily: 'Impact, sans-serif', textColor: '#FFFFFF', activeHighlightColor: '#FFFFFF', textShadow: '0 3px 2px rgba(0, 0, 0, 1)', textStroke: '2px black', isUppercase: true, textBg: 'transparent' };
-    } else if (template === 'Cinematic Serif' || template === 'Cinematic') {
-      updates = { ...updates, fontFamily: 'Georgia, serif', textColor: '#F9FAFB', activeHighlightColor: '#FFD700', textShadow: '0 2px 10px rgba(0, 0, 0, 0.9)', textStroke: 'none', isUppercase: false, textBg: 'transparent' };
-    }
-    set(updates);
-  },
-  
+  setActiveTemplate: (template) => set({ activeTemplate: template }),
   setTemplateCategory: (category) => set({ templateCategory: category }),
   setTemplateSearchQuery: (query) => set({ templateSearchQuery: query }),
   setBannerDismissed: (dismissed) => set({ bannerDismissed: dismissed }),
@@ -500,7 +1008,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setTextStroke: (stroke) => set({ textStroke: stroke }),
   setTextShadow: (shadow) => set({ textShadow: shadow }),
   setIsUppercase: (val) => set({ isUppercase: val }),
-  
+
   saveCurrentAsPreset: (name) => {
     const s = get();
     const newPreset: Preset = {
@@ -522,11 +1030,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     };
     set({ userPresets: [...s.userPresets, newPreset] });
   },
-  
+
   deletePreset: (id) => {
     set(state => ({ userPresets: state.userPresets.filter(p => p.id !== id) }));
   },
-  
+
   applyPreset: (preset) => {
     set({
       activeTemplate: preset.template,
@@ -544,7 +1052,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       isUppercase: preset.isUppercase
     });
   },
-  
+
   setOutputMode: (mode) => set({ outputMode: mode }),
   setSourceLanguage: (lang) => set({ sourceLanguage: lang }),
   setMaxWordsPerCaption: (count) => set({ maxWordsPerCaption: count }),
@@ -578,24 +1086,50 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     textPositionY: Math.max(5, Math.min(95, Math.round(y)))
   }),
   setTextAlign: (align) => set({ textAlign: align }),
-  setPlaybackSpeed: (speed) => set({ playbackSpeed: speed }),
   setVolume: (vol) => set({ volume: vol }),
   setIsMuted: (muted) => set({ isMuted: muted }),
   setLinesCount: (lines) => set({ linesCount: lines }),
   toggleCaptionSettings: () => set((state) => ({ captionSettingsOpen: !state.captionSettingsOpen })),
-  
+
   setSelectedCaptionId: (id) => set({ selectedCaptionId: id }),
   setSelectedWordId: (id) => set({ selectedWordId: id }),
-  
+
+  undo: () => {
+    const { history, historyIndex } = get();
+    if (historyIndex > 0) {
+      const prevIndex = historyIndex - 1;
+      set({
+        captions: JSON.parse(JSON.stringify(history[prevIndex])),
+        historyIndex: prevIndex,
+        hasUnsavedEdits: true
+      });
+    }
+  },
+
+  redo: () => {
+    const { history, historyIndex } = get();
+    if (historyIndex < history.length - 1) {
+      const nextIndex = historyIndex + 1;
+      set({
+        captions: JSON.parse(JSON.stringify(history[nextIndex])),
+        historyIndex: nextIndex,
+        hasUnsavedEdits: true
+      });
+    }
+  },
+
+  markSaved: () => set({ hasUnsavedEdits: false }),
+
   clearProject: () => set({
-    video: { file: null, url: null, duration: 0, width: 0, height: 0 },
-    captions: [],
+    video: { file: null, url: "/demo_video.mp4", duration: 13.2, width: 1080, height: 1920 },
+    captions: INITIAL_CAPTIONS,
     currentTime: 0,
     isPlaying: false,
+    isReversing: false,
     selectedCaptionId: null,
     selectedWordId: null,
     hasUnsavedEdits: false,
-    history: [[]],
+    history: [JSON.parse(JSON.stringify(INITIAL_CAPTIONS))],
     historyIndex: 0
   })
 }))
