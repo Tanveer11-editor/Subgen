@@ -8,7 +8,7 @@ export default function LandingPage() {
   const navigate = useNavigate()
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const { loadNewVideo } = useEditorStore()
+  const { loadNewVideo, loadDemoProject } = useEditorStore()
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
@@ -77,24 +77,24 @@ export default function LandingPage() {
           <span className="w-2 h-2 rounded-full bg-accent animate-pulse" />
           <span className="text-xs font-semibold tracking-widest uppercase">New: Tanglish Support</span>
         </div>
-        
+
         <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight max-w-4xl leading-tight mb-6">
           Captivate Your Audience With <br />
           <span className="text-transparent bg-clip-text bg-gradient-to-r from-accent to-yellow-600">
             Pro Animated Subtitles
           </span>
         </h1>
-        
+
         <p className="text-lg md:text-xl text-text-secondary max-w-2xl mb-12">
-          Word-level accurate AI transcription in Tamil, Tanglish, and English. 
+          Word-level accurate AI transcription in Tamil, Tanglish, and English.
           Export stunning 4K videos ready for Reels & Shorts in seconds.
         </p>
 
         {/* Upload Area */}
-        <div 
+        <div
           className={`w-full max-w-2xl border-2 border-dashed rounded-2xl p-12 transition-all duration-200 ${
-            isDragging 
-              ? "border-accent bg-accent/5 scale-[1.02]" 
+            isDragging
+              ? "border-accent bg-accent/5 scale-[1.02]"
               : "border-border bg-bg-panel hover:border-text-muted"
           }`}
           onDragOver={handleDragOver}
@@ -111,22 +111,29 @@ export default function LandingPage() {
               Supports MP4, MOV, WebM up to 2GB.
             </p>
             <div className="flex gap-4">
-              <input 
-                type="file" 
-                ref={fileInputRef} 
-                onChange={handleFileChange} 
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
                 accept="video/mp4,video/quicktime,video/webm,video/x-matroska"
-                className="hidden" 
+                className="hidden"
               />
-              <Button 
-                variant="accent" 
-                size="lg" 
+              <Button
+                variant="accent"
+                size="lg"
                 className="px-8 shadow-[0_0_20px_rgba(255,176,0,0.3)]"
                 onClick={() => fileInputRef.current?.click()}
               >
                 Browse Files
               </Button>
-              <Button variant="outline" size="lg" onClick={() => navigate("/editor")}>
+              <Button
+                variant="outline"
+                size="lg"
+                onClick={() => {
+                  loadDemoProject()
+                  navigate("/editor")
+                }}
+              >
                 Try Demo Project
               </Button>
             </div>

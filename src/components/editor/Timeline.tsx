@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from "react"
-import { 
-  Play, Pause, RotateCcw, RotateCw, Trash2, 
+import {
+  Play, Pause, RotateCcw, RotateCw, Trash2,
   Scissors, MousePointer, Magnet, ZoomIn, ZoomOut,
   SkipBack, SkipForward, Volume2, Split
 } from "lucide-react"
@@ -16,7 +16,15 @@ interface DragState {
   initialEnd: number;
 }
 
-export const Timeline: React.FC = () => {
+interface TimelineProps {
+  duration?: number;
+  onSeek?: (time: number) => void;
+}
+
+export const Timeline: React.FC<TimelineProps> = ({
+  duration: durationProp,
+  onSeek,
+}) => {
   const {
     video,
     captions,
@@ -56,7 +64,7 @@ export const Timeline: React.FC = () => {
     historyIndex
   } = useEditorStore()
 
-  const duration = Math.max(1, video.duration || 13.2)
+  const duration = durationProp && durationProp > 0 ? durationProp : Math.max(1, video.duration || 13.2)
   const timelineContainerRef = useRef<HTMLDivElement>(null)
   const tracksScrollRef = useRef<HTMLDivElement>(null)
   const [dragState, setDragState] = useState<DragState | null>(null)
@@ -83,8 +91,8 @@ export const Timeline: React.FC = () => {
       // If typing in any input, textarea or contenteditable element, do not hijack editing keys
       const target = e.target as HTMLElement | null
       const isInput = target && (
-        target.tagName === "INPUT" || 
-        target.tagName === "TEXTAREA" || 
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
         target.isContentEditable
       )
 
@@ -170,19 +178,19 @@ export const Timeline: React.FC = () => {
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [
-    isPlaying, 
-    isReversing, 
-    playbackSpeed, 
-    togglePlayPause, 
-    stopPlayback, 
-    cycleForwardSpeed, 
-    startReversePlayback, 
-    setActiveTool, 
-    undo, 
-    redo, 
-    selectedCaptionId, 
-    selectedWordId, 
-    deleteWord, 
+    isPlaying,
+    isReversing,
+    playbackSpeed,
+    togglePlayPause,
+    stopPlayback,
+    cycleForwardSpeed,
+    startReversePlayback,
+    setActiveTool,
+    undo,
+    redo,
+    selectedCaptionId,
+    selectedWordId,
+    deleteWord,
     deleteCaption,
     showToast
   ])
@@ -200,6 +208,25 @@ export const Timeline: React.FC = () => {
   // -------------------------------------------------------------
   // MOUSE DRAGGING FOR WORD RESIZING, WORD MOVING, TRIM, & PLAYHEAD
   // -------------------------------------------------------------
+  // Auto-scroll timeline to follow playhead during playback
+  useEffect(() => {
+    if (!isPlaying || !tracksScrollRef.current) return
+    const container = tracksScrollRef.current
+    const playheadPx = currentTime * pxPerSec
+    const viewLeft = container.scrollLeft
+    const viewRight = viewLeft + container.clientWidth
+
+    if (playheadPx > viewRight - 50 || playheadPx < viewLeft) {
+      container.scrollTo({
+        left: Math.max(0, playheadPx - 100),
+        behavior: "smooth"
+      })
+    }
+  }, [currentTime, isPlaying, pxPerSec])
+
+  // -------------------------------------------------------------
+  // MOUSE DRAGGING FOR WORD RESIZING, WORD MOVING, TRIM, & PLAYHEAD
+  // -------------------------------------------------------------
   const handlePointerDown = (
     e: React.PointerEvent,
     type: DragState["type"],
@@ -209,7 +236,14 @@ export const Timeline: React.FC = () => {
     initialEnd = 0
   ) => {
     e.stopPropagation()
-    e.preventDefault()
+    if (type === "playhead") {
+      const time = clientXToSeconds(e.clientX)
+      if (onSeek) {
+        onSeek(time)
+      } else {
+        setCurrentTime(time)
+      }
+    }
     setDragState({
       type,
       segmentId,
@@ -218,7 +252,9 @@ export const Timeline: React.FC = () => {
       initialStart,
       initialEnd,
     })
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    try {
+      ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {}
   }
 
   const handlePointerMove = (e: React.PointerEvent) => {
@@ -237,7 +273,11 @@ export const Timeline: React.FC = () => {
 
     if (dragState.type === "playhead") {
       const newTime = clientXToSeconds(e.clientX)
-      setCurrentTime(newTime)
+      if (onSeek) {
+        onSeek(newTime)
+      } else {
+        setCurrentTime(newTime)
+      }
       setFloatingTooltip({
         x: e.clientX,
         y: e.clientY - 35,
@@ -290,6 +330,25 @@ export const Timeline: React.FC = () => {
 
   const handlePointerUp = (e: React.PointerEvent) => {
     if (dragState) {
+      const deltaX = Math.abs(e.clientX - dragState.initialX)
+      if (deltaX < 4) {
+        if (dragState.type === "word-move" && dragState.segmentId) {
+          setSelectedCaptionId(dragState.segmentId)
+          if (dragState.wordId) setSelectedWordId(dragState.wordId)
+          if (onSeek) onSeek(dragState.initialStart)
+          else setCurrentTime(dragState.initialStart)
+        }
+      }
+
+      if (dragState.type === "playhead") {
+        const finalTime = clientXToSeconds(e.clientX)
+        if (onSeek) {
+          onSeek(finalTime)
+        } else {
+          setCurrentTime(finalTime)
+        }
+      }
+
       try {
         ;(e.target as HTMLElement).releasePointerCapture(e.pointerId)
       } catch {}
@@ -305,7 +364,11 @@ export const Timeline: React.FC = () => {
       splitAtPlayhead(time)
       showToast(`Cut at ${time.toFixed(2)}s`)
     } else {
-      setCurrentTime(time)
+      if (onSeek) {
+        onSeek(time)
+      } else {
+        setCurrentTime(time)
+      }
     }
   }
 
@@ -327,25 +390,27 @@ export const Timeline: React.FC = () => {
   const handleSkipPrev = () => {
     const allStarts = captions.map(c => c.start).sort((a, b) => a - b)
     const prev = allStarts.reverse().find(t => t < currentTime - 0.2)
-    if (prev !== undefined) {
-      setCurrentTime(prev)
+    const target = prev !== undefined ? prev : trimStart
+    if (onSeek) {
+      onSeek(target)
     } else {
-      setCurrentTime(trimStart)
+      setCurrentTime(target)
     }
   }
 
   const handleSkipNext = () => {
     const allStarts = captions.map(c => c.start).sort((a, b) => a - b)
     const next = allStarts.find(t => t > currentTime + 0.2)
-    if (next !== undefined) {
-      setCurrentTime(next)
+    const target = next !== undefined ? next : (trimEnd > 0 ? trimEnd : duration)
+    if (onSeek) {
+      onSeek(target)
     } else {
-      setCurrentTime(trimEnd)
+      setCurrentTime(target)
     }
   }
 
   // Flatten words for the word-level timeline blocks
-  const allWordBlocks = captions.flatMap((cap) => 
+  const allWordBlocks = captions.flatMap((cap) =>
     (cap.words && cap.words.length > 0)
       ? cap.words.map(w => ({ ...w, parentCaption: cap }))
       : [{
@@ -359,7 +424,7 @@ export const Timeline: React.FC = () => {
   )
 
   return (
-    <footer 
+    <footer
       ref={timelineContainerRef}
       className="h-[235px] shrink-0 border-t border-[#27272D] bg-[#0E0E12] flex flex-col z-20 select-none relative"
       onPointerMove={handlePointerMove}
@@ -374,7 +439,7 @@ export const Timeline: React.FC = () => {
 
       {/* Floating Tooltip during drag */}
       {floatingTooltip && (
-        <div 
+        <div
           className="fixed pointer-events-none z-50 bg-[#141418] border border-accent text-accent font-mono text-[11px] px-2 py-0.5 rounded shadow-xl -translate-x-1/2 font-bold"
           style={{ left: floatingTooltip.x, top: floatingTooltip.y }}
         >
@@ -620,24 +685,34 @@ export const Timeline: React.FC = () => {
       {/* ========================================================= */}
       {/* 2. MULTI-TRACK TIMELINE CANVAS                            */}
       {/* ========================================================= */}
-      <div 
+      <div
         ref={tracksScrollRef}
         onClick={handleTimelineClick}
+        onPointerDown={(e) => {
+          if (activeTool === "blade") return
+          handlePointerDown(e, "playhead")
+        }}
         className={`flex-1 relative overflow-x-auto overflow-y-hidden select-none bg-[#09090C] ${
           activeTool === "blade" ? "cursor-crosshair" : "cursor-pointer"
         }`}
       >
         <div style={{ width: `${totalTimelineWidth}px` }} className="relative h-full flex flex-col">
           {/* A. TIME RULER */}
-          <div className="h-6 border-b border-[#23232A] bg-[#121217] sticky top-0 flex items-end text-[10px] text-[#6E6E78] font-mono z-10 pointer-events-none">
+          <div
+            onPointerDown={(e) => {
+              if (activeTool === "blade") return
+              handlePointerDown(e, "playhead")
+            }}
+            className="h-6 border-b border-[#23232A] bg-[#121217] sticky top-0 flex items-end text-[10px] text-[#6E6E78] font-mono z-10 cursor-pointer hover:bg-[#181820] transition-colors"
+          >
             {Array.from({ length: Math.ceil(duration / 2) + 2 }).map((_, i) => {
               const tickSeconds = i * 2
               const leftPx = tickSeconds * pxPerSec
               if (leftPx > totalTimelineWidth) return null
 
               return (
-                <div 
-                  key={i} 
+                <div
+                  key={i}
                   className="absolute bottom-0 h-4 border-l border-[#2E2E38] pl-1 pb-0.5 flex items-end"
                   style={{ left: `${leftPx}px` }}
                 >
@@ -654,7 +729,7 @@ export const Timeline: React.FC = () => {
             </span>
 
             {/* Video Filmstrip Clip Block */}
-            <div 
+            <div
               className="absolute top-1 bottom-1 rounded bg-[#1A1A24] border border-[#2E2E3C] overflow-hidden flex items-center"
               style={{
                 left: `${trimStart * pxPerSec}px`,
@@ -696,13 +771,13 @@ export const Timeline: React.FC = () => {
 
             {/* Trimmed-out Shaded Regions */}
             {trimStart > 0 && (
-              <div 
+              <div
                 className="absolute top-0 bottom-0 left-0 bg-black/60 pointer-events-none border-r border-[#FFB800]/50"
                 style={{ width: `${trimStart * pxPerSec}px` }}
               />
             )}
             {trimEnd < duration && (
-              <div 
+              <div
                 className="absolute top-0 bottom-0 right-0 bg-black/60 pointer-events-none border-l border-[#FFB800]/50"
                 style={{ left: `${trimEnd * pxPerSec}px`, width: `${(duration - trimEnd) * pxPerSec}px` }}
               />
@@ -730,7 +805,11 @@ export const Timeline: React.FC = () => {
                     } else {
                       setSelectedCaptionId(wb.segmentId)
                       setSelectedWordId(wb.id)
-                      setCurrentTime(wb.start)
+                      if (onSeek) {
+                        onSeek(wb.start)
+                      } else {
+                        setCurrentTime(wb.start)
+                      }
                     }
                   }}
                   onPointerDown={(e) => {
@@ -809,7 +888,7 @@ export const Timeline: React.FC = () => {
 
           {/* E. HOVER BLADE CUT GUIDE (When Blade tool is active) */}
           {activeTool === "blade" && hoverCutTime !== null && (
-            <div 
+            <div
               className="absolute top-0 bottom-0 w-0.5 bg-red-500 z-40 pointer-events-none shadow-[0_0_10px_rgba(239,68,68,0.9)]"
               style={{ left: `${hoverCutTime * pxPerSec}px` }}
             >

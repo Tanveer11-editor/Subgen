@@ -1,6 +1,6 @@
 import React, { useState } from "react"
-import { 
-  Search, Bookmark, X, Check, Trash2, 
+import {
+  Search, Bookmark, X, Check, Trash2,
   AlignLeft, AlignCenter, AlignRight, Move
 } from "lucide-react"
 import { useEditorStore } from "@/stores/editorStore"
@@ -17,15 +17,15 @@ interface TemplateItem {
 
 const TEMPLATES_LIST: TemplateItem[] = [
   {
-    id: "captik-glow",
-    name: "Captik Glow",
+    id: "glow",
+    name: "Glow",
     badge: "Popular",
     previewText: "kiya,",
     fontFamily: "Outfit, sans-serif"
   },
   {
-    id: "captik-shadow",
-    name: "Captik Shadow",
+    id: "shadow",
+    name: "Shadow",
     badge: "New",
     previewText: "kiya,",
     fontFamily: "Montserrat, sans-serif"
@@ -150,7 +150,7 @@ export const RightSidebarPanel: React.FC = () => {
   }
 
   // Filter templates by search query
-  const filteredTemplates = TEMPLATES_LIST.filter(t => 
+  const filteredTemplates = TEMPLATES_LIST.filter(t =>
     t.name.toLowerCase().includes(templateSearchQuery.toLowerCase())
   )
 
@@ -218,7 +218,7 @@ export const RightSidebarPanel: React.FC = () => {
                     : "bg-[#16161C] border-border text-text-muted hover:text-text-primary hover:border-text-muted/40"
                 }`}
               >
-                Captik Templates
+                Templates
               </button>
               <button
                 onClick={() => setTemplateCategory("presets")}
@@ -329,8 +329,8 @@ export const RightSidebarPanel: React.FC = () => {
                 {/* 2-Column Grid of Template Cards */}
                 <div className="grid grid-cols-2 gap-3 pb-4">
                   {filteredTemplates.map((template) => {
-                    const isSelected = activeTemplate === template.name || 
-                      (template.name === "Captik Glow" && activeTemplate === "Glow") ||
+                    const isSelected = activeTemplate === template.name ||
+                      (template.name === "Glow" && activeTemplate === "Glow") ||
                       (template.name === "Clean Minimal" && activeTemplate === "Clean") ||
                       (template.name === "Karaoke Pop" && activeTemplate === "Karaoke") ||
                       (template.name === "Bold Punch" && activeTemplate === "Bold") ||
@@ -381,15 +381,15 @@ export const RightSidebarPanel: React.FC = () => {
 
                           {/* Overlay Caption Preview on the Creator's Chest / Video */}
                           <div className="absolute inset-x-2 bottom-6 flex flex-col items-center justify-center text-center pointer-events-none">
-                            {template.name === "Captik Glow" ? (
-                              <span 
+                            {template.name === "Glow" ? (
+                              <span
                                 className="text-white text-sm font-bold tracking-tight drop-shadow-[0_0_12px_rgba(255,184,0,0.95)]"
                                 style={{ fontFamily: "Outfit, sans-serif" }}
                               >
                                 {template.previewText}
                               </span>
-                            ) : template.name === "Captik Shadow" ? (
-                              <span 
+                            ) : template.name === "Shadow" ? (
+                              <span
                                 className="text-white text-sm font-black tracking-tight"
                                 style={{
                                   fontFamily: "Montserrat, sans-serif",
@@ -399,28 +399,28 @@ export const RightSidebarPanel: React.FC = () => {
                                 {template.previewText}
                               </span>
                             ) : template.name === "Scribble" ? (
-                              <span 
+                              <span
                                 className="text-yellow-300 text-lg font-bold"
                                 style={{ fontFamily: "'Caveat', cursive" }}
                               >
                                 {template.previewText}
                               </span>
                             ) : template.name === "Archives" ? (
-                              <span 
+                              <span
                                 className="text-white text-[10px] font-extrabold bg-black/85 px-2 py-0.5 rounded border border-white/20 tracking-wider"
                                 style={{ fontFamily: "Inter, sans-serif" }}
                               >
                                 {template.previewText}
                               </span>
                             ) : template.name === "Karaoke Pop" ? (
-                              <span 
+                              <span
                                 className="text-accent text-sm font-black drop-shadow-[0_0_14px_rgba(255,184,0,0.9)]"
                                 style={{ fontFamily: "Outfit, sans-serif" }}
                               >
                                 {template.previewText}
                               </span>
                             ) : template.name === "Bold Punch" ? (
-                              <span 
+                              <span
                                 className="text-accent text-sm font-black uppercase tracking-wider"
                                 style={{
                                   fontFamily: "'Anton', sans-serif",
@@ -430,14 +430,14 @@ export const RightSidebarPanel: React.FC = () => {
                                 {template.previewText}
                               </span>
                             ) : template.name === "Neon Cyber" ? (
-                              <span 
+                              <span
                                 className="text-[#00F0FF] text-xs font-black uppercase tracking-wider drop-shadow-[0_0_12px_rgba(0,240,255,0.9)]"
                                 style={{ fontFamily: "Montserrat, sans-serif" }}
                               >
                                 {template.previewText}
                               </span>
                             ) : template.name === "Impact Meme" ? (
-                              <span 
+                              <span
                                 className="text-white text-xs font-black uppercase tracking-widest"
                                 style={{
                                   fontFamily: "Impact, sans-serif",
@@ -447,13 +447,13 @@ export const RightSidebarPanel: React.FC = () => {
                                 {template.previewText}
                               </span>
                             ) : template.name === "Cinematic Serif" ? (
-                              <span 
+                              <span
                                 className="text-white text-xs font-serif italic drop-shadow-md"
                               >
                                 {template.previewText}
                               </span>
                             ) : (
-                              <span 
+                              <span
                                 className="text-white text-[11px] font-bold bg-black/50 px-2 py-0.5 rounded-md border border-white/10"
                                 style={{ fontFamily: "Inter, sans-serif" }}
                               >
@@ -500,7 +500,7 @@ export const RightSidebarPanel: React.FC = () => {
                         key={preset.id}
                         className="bg-[#16161C] border border-border hover:border-accent/50 rounded-xl p-3 flex items-center justify-between transition-all group"
                       >
-                        <div 
+                        <div
                           className="flex-1 cursor-pointer"
                           onClick={() => applyPreset(preset)}
                         >
@@ -564,7 +564,7 @@ export const RightSidebarPanel: React.FC = () => {
                   X: {textPositionX}% • Y: {textPositionY}%
                 </span>
               </div>
-              
+
               <div className="grid grid-cols-3 gap-2 bg-[#16161C] p-1 rounded-xl border border-border">
                 {[
                   { id: "top", label: "Top (14%)" },
@@ -667,7 +667,7 @@ export const RightSidebarPanel: React.FC = () => {
                 onChange={(e) => setFontFamily(e.target.value)}
                 className="w-full bg-[#16161C] border border-border rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-accent"
               >
-                <option value="Outfit, sans-serif">Outfit (Captik Modern)</option>
+                <option value="Outfit, sans-serif">Outfit (Modern Bold)</option>
                 <option value="Montserrat, sans-serif">Montserrat (Geometric Bold)</option>
                 <option value="Inter, sans-serif">Inter (Clean Subtitle)</option>
                 <option value="'Caveat', cursive">Caveat (Scribble Handwritten)</option>

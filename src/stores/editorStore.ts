@@ -191,6 +191,7 @@ export interface EditorState {
   needsTranscription: boolean;
   setNeedsTranscription: (needs: boolean) => void;
   loadNewVideo: (file: File) => void;
+  loadDemoProject: () => void;
 
   undo: () => void;
   redo: () => void;
@@ -408,15 +409,15 @@ export const useEditorStore = create<EditorState>((set, get) => ({
 
   // Panels & styling
   activeTab: 'templates',
-  activeTemplate: 'Captik Glow',
+  activeTemplate: 'Glow',
   templateCategory: 'templates',
   templateSearchQuery: '',
   bannerDismissed: false,
   userPresets: [
     {
       id: 'preset-default-1',
-      name: 'Captik Ambient Gold',
-      template: 'Captik Glow',
+      name: 'Ambient Gold',
+      template: 'Glow',
       fontFamily: 'Outfit',
       fontSize: 28,
       textColor: '#FFFFFF',
@@ -463,6 +464,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setNeedsTranscription: (needs) => set({ needsTranscription: needs }),
 
   loadNewVideo: (file: File) => {
+    const prevUrl = get().video.url;
+    if (prevUrl && prevUrl.startsWith("blob:")) {
+      try { URL.revokeObjectURL(prevUrl); } catch {}
+    }
     const url = URL.createObjectURL(file);
     const title = file.name.replace(/\.[^/.]+$/, "") || "Untitled Video";
     set({
@@ -484,6 +489,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectedCaptionId: null,
       selectedWordId: null,
       needsTranscription: true,
+      isPlaying: false,
+      isReversing: false,
+    });
+  },
+
+  loadDemoProject: () => {
+    set({
+      video: {
+        file: null,
+        url: "/demo_video.mp4",
+        duration: 13.2,
+        width: 1080,
+        height: 1920,
+      },
+      captions: JSON.parse(JSON.stringify(INITIAL_CAPTIONS)),
+      history: [JSON.parse(JSON.stringify(INITIAL_CAPTIONS))],
+      historyIndex: 0,
+      hasUnsavedEdits: false,
+      currentTime: 0,
+      trimStart: 0,
+      trimEnd: 13.2,
+      projectTitle: "Tamil Speech Demo",
+      selectedCaptionId: null,
+      selectedWordId: null,
+      needsTranscription: false,
       isPlaying: false,
       isReversing: false,
     });
@@ -513,7 +543,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     }
     return {
       video: updated,
-      trimEnd: (state.trimEnd === 13.2 || state.trimEnd === 0) && updated.duration ? updated.duration : state.trimEnd
+      trimEnd: (state.trimEnd === 13.2 || state.trimEnd === 0 || (updated.duration && state.trimEnd > updated.duration)) && updated.duration
+        ? updated.duration
+        : (state.trimEnd || updated.duration || 13.2)
     };
   }),
 
@@ -540,7 +572,41 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     const { captions, history, historyIndex } = get();
     const updatedCaptions = captions.map((cap) => {
       if (cap.id !== id) return cap;
-      return { ...cap, ...updates };
+      const updated = { ...cap, ...updates };
+
+      // When text is edited, resynchronize the words list so on-screen words and video render match
+      if (updates.text !== undefined && updates.words === undefined) {
+        const rawWords = updates.text.trim().split(/\s+/).filter(Boolean);
+        const prevWords = cap.words || [];
+        const capDuration = Math.max(0.2, updated.end - updated.start);
+
+        if (rawWords.length === 0) {
+          updated.words = [];
+        } else if (rawWords.length === prevWords.length) {
+          // Exactly same number of words: keep original word timing, update text
+          updated.words = prevWords.map((pw, i) => ({
+            ...pw,
+            text: rawWords[i],
+          }));
+        } else {
+          // Distribute words proportionally across segment duration
+          const wordDur = capDuration / rawWords.length;
+          updated.words = rawWords.map((wText, i) => {
+            const wStart = Number((updated.start + (i * wordDur)).toFixed(2));
+            const wEnd = Number((updated.start + ((i + 1) * wordDur)).toFixed(2));
+            const prevId = prevWords[i]?.id || `w-${Math.random().toString(36).substring(2, 9)}`;
+            return {
+              id: prevId,
+              text: wText,
+              start: wStart,
+              end: Math.max(wStart + 0.1, wEnd),
+              segmentId: cap.id,
+            };
+          });
+        }
+      }
+
+      return updated;
     });
 
     const nextHistory = pushStateToHistory(history, historyIndex, updatedCaptions);
@@ -1121,15 +1187,19 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   markSaved: () => set({ hasUnsavedEdits: false }),
 
   clearProject: () => set({
-    video: { file: null, url: "/demo_video.mp4", duration: 13.2, width: 1080, height: 1920 },
-    captions: INITIAL_CAPTIONS,
+    video: { file: null, url: null, duration: 0, width: 1080, height: 1920 },
+    captions: [],
     currentTime: 0,
     isPlaying: false,
     isReversing: false,
     selectedCaptionId: null,
     selectedWordId: null,
     hasUnsavedEdits: false,
-    history: [JSON.parse(JSON.stringify(INITIAL_CAPTIONS))],
-    historyIndex: 0
+    history: [[]],
+    historyIndex: 0,
+    projectTitle: "New Project",
+    trimStart: 0,
+    trimEnd: 0,
+    needsTranscription: false,
   })
 }))

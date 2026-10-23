@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react"
-import { 
+import {
   Play, Loader2, AlertTriangle, Upload, ZoomIn, ZoomOut,
   Grid, Smartphone, Maximize
 } from "lucide-react"
@@ -13,6 +13,7 @@ interface VideoPreviewProps {
   onDurationChange: (duration: number) => void;
   onSeek: (time: number) => void;
   videoRef: React.RefObject<HTMLVideoElement | null>;
+  onLoadNewVideo?: (file: File) => void;
 }
 
 export const VideoPreview: React.FC<VideoPreviewProps> = ({
@@ -21,18 +22,19 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
   onDurationChange,
   onSeek,
   videoRef,
+  onLoadNewVideo,
 }) => {
-  const { 
-    video, 
+  const {
+    video,
     setVideo,
-    isPlaying, 
-    setIsPlaying, 
+    isPlaying,
+    setIsPlaying,
     isReversing,
-    currentTime, 
-    aspectRatio, 
+    currentTime,
+    aspectRatio,
     setAspectRatio,
-    playbackSpeed, 
-    volume, 
+    playbackSpeed,
+    volume,
     isMuted,
     trimStart,
     trimEnd,
@@ -55,6 +57,13 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
     if (!videoRef.current) return
 
     if (isPlaying) {
+      // Synchronize video currentTime to store currentTime if they diverge
+      const storeTime = useEditorStore.getState().currentTime
+      if (Math.abs(videoRef.current.currentTime - storeTime) > 0.08) {
+        try {
+          videoRef.current.currentTime = storeTime
+        } catch {}
+      }
       videoRef.current.playbackRate = playbackSpeed
       videoRef.current.volume = isMuted ? 0 : volume
       videoRef.current.play().catch(() => setIsPlaying(false))
@@ -62,6 +71,27 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
       videoRef.current.pause()
     }
   }, [isPlaying, isReversing, playbackSpeed, volume, isMuted, setIsPlaying, videoRef])
+
+  // 1b. SEEK & FRAME SYNC (Keep HTML5 video frame synced with store currentTime)
+  useEffect(() => {
+    if (!videoRef.current) return
+
+    if (!isPlaying && !isReversing) {
+      // While paused, keep video frame synced so clicking timeline updates preview frame immediately
+      if (Math.abs(videoRef.current.currentTime - currentTime) > 0.04) {
+        try {
+          videoRef.current.currentTime = currentTime
+        } catch {}
+      }
+    } else if (isPlaying) {
+      // While playing, if user clicked a jump point on timeline (>0.35s jump)
+      if (Math.abs(videoRef.current.currentTime - currentTime) > 0.35) {
+        try {
+          videoRef.current.currentTime = currentTime
+        } catch {}
+      }
+    }
+  }, [currentTime, isPlaying, isReversing, videoRef])
 
   // 2. REVERSE PLAYBACK ENGINE (Using requestAnimationFrame)
   useEffect(() => {
@@ -80,9 +110,10 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
 
       const nextTime = currentTime - dt * playbackSpeed
       if (nextTime <= trimStart) {
-        // Loop back to trimEnd
-        if (videoRef.current) videoRef.current.currentTime = trimEnd
-        onTimeUpdate(trimEnd)
+        // Loop back to trimEnd or video duration
+        const effectiveEnd = (trimEnd > trimStart && trimEnd > 0) ? trimEnd : (duration > 0 ? duration : 13.2)
+        if (videoRef.current) videoRef.current.currentTime = effectiveEnd
+        onTimeUpdate(effectiveEnd)
       } else {
         if (videoRef.current) {
           videoRef.current.currentTime = nextTime
@@ -95,17 +126,23 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
 
     animationFrameId = requestAnimationFrame(stepReverse)
     return () => cancelAnimationFrame(animationFrameId)
-  }, [isReversing, currentTime, playbackSpeed, trimStart, trimEnd, onTimeUpdate, videoRef])
+  }, [isReversing, currentTime, playbackSpeed, trimStart, trimEnd, onTimeUpdate, duration, videoRef])
 
   // 3. TRIM BOUNDS CLAMPING
   const handleVideoTimeUpdate = () => {
     if (!videoRef.current) return
     const cur = videoRef.current.currentTime
 
-    // Check if forward play hit trimEnd
-    if (isPlaying && cur >= trimEnd) {
+    const maxBound = (trimEnd > trimStart && trimEnd > 0)
+      ? trimEnd
+      : (videoRef.current.duration > 0 ? videoRef.current.duration : (duration > 0 ? duration : Infinity))
+
+    // Check if forward play hit trimEnd or video end
+    if (isPlaying && cur >= maxBound) {
+      videoRef.current.pause()
       videoRef.current.currentTime = trimStart
       onTimeUpdate(trimStart)
+      setIsPlaying(false)
       return
     }
 
@@ -121,7 +158,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
         width: videoRef.current.videoWidth,
         height: videoRef.current.videoHeight,
       })
-      if (trimEnd === 0 || trimEnd === 13.2) {
+      if (!trimEnd || trimEnd <= 0 || trimEnd === 13.2 || trimEnd > dur) {
         setTrimRange(0, dur)
       }
       setIsLoading(false)
@@ -136,7 +173,11 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
         alert("Please upload a valid video file.")
         return
       }
-      loadNewVideo(file)
+      if (onLoadNewVideo) {
+        onLoadNewVideo(file)
+      } else {
+        loadNewVideo(file)
+      }
     }
     if (e.target) e.target.value = ""
   }
@@ -151,7 +192,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
   }[aspectRatio] || "w-[360px] h-[640px]"
 
   return (
-    <section 
+    <section
       onDragOver={(e) => {
         e.preventDefault()
         setIsDraggingOver(true)
@@ -166,7 +207,11 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
             alert("Please drop a valid video file.")
             return
           }
-          loadNewVideo(file)
+          if (onLoadNewVideo) {
+            onLoadNewVideo(file)
+          } else {
+            loadNewVideo(file)
+          }
         }
       }}
       className="flex-1 flex flex-col bg-[#08080A] relative items-center justify-center p-6 overflow-hidden select-none"
@@ -286,7 +331,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
       </div>
 
       {/* Main Video Screen Container with Scaled Box */}
-      <div 
+      <div
         ref={containerRef}
         style={{
           transform: `scale(${zoomScale})`,
@@ -334,7 +379,7 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
 
             {/* Center Play Indicator when Paused */}
             {!isPlaying && !isReversing && !isLoading && !errorMessage && (
-              <div 
+              <div
                 className="absolute inset-0 flex items-center justify-center bg-black/30 z-20 cursor-pointer"
                 onClick={() => setIsPlaying(true)}
               >
@@ -353,9 +398,9 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
 
             {/* Bottom Embedded Player Controls */}
             <div className="absolute inset-x-0 bottom-0 opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-auto z-30">
-              <VideoPlayerControls 
-                duration={duration} 
-                onSeek={onSeek} 
+              <VideoPlayerControls
+                duration={duration}
+                onSeek={onSeek}
               />
             </div>
           </>
@@ -371,12 +416,12 @@ export const VideoPreview: React.FC<VideoPreviewProps> = ({
                 Upload your video to edit, adjust word timings, and trim clips in real-time.
               </p>
             </div>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={handleFileChange} 
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
               accept="video/mp4,video/quicktime,video/webm"
-              className="hidden" 
+              className="hidden"
             />
             <button
               onClick={() => fileInputRef.current?.click()}

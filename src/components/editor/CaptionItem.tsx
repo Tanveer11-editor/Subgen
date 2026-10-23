@@ -1,7 +1,7 @@
 import React, { useState } from "react"
-import { Trash2, Split, Play, ChevronUp, ChevronDown, Clock, Edit2 } from "lucide-react"
+import { Trash2, Split, Play, ChevronUp, ChevronDown, Clock } from "lucide-react"
 import { useEditorStore } from "@/stores/editorStore"
-import type { CaptionSegment } from "@/stores/editorStore"
+import type { CaptionSegment, Word } from "@/stores/editorStore"
 import { formatTimestamp } from "@/lib/timeUtils"
 
 interface CaptionItemProps {
@@ -16,22 +16,24 @@ export const CaptionItem: React.FC<CaptionItemProps> = ({
   index,
   onSeek,
 }) => {
-  const { 
-    selectedCaptionId, 
-    setSelectedCaptionId, 
+  const {
+    selectedCaptionId,
+    setSelectedCaptionId,
     selectedWordId,
     setSelectedWordId,
-    updateCaption, 
-    deleteCaption, 
+    updateCaption,
+    updateWord,
+    deleteCaption,
     splitCaptionAtWord,
     updateWordTiming,
-    currentTime 
+    currentTime
   } = useEditorStore()
 
   const isSelected = selectedCaptionId === caption.id
   const isActive = currentTime >= caption.start && currentTime < caption.end
 
-  const [isEditingText, setIsEditingText] = useState(false)
+  const [editingWordId, setEditingWordId] = useState<string | null>(null)
+  const [editingWordText, setEditingWordText] = useState("")
 
   // Word length adjusters (+/- 0.05s)
   const handleNudgeWordStart = (wordId: string, currentStart: number, currentEnd: number, delta: number) => {
@@ -42,6 +44,19 @@ export const CaptionItem: React.FC<CaptionItemProps> = ({
   const handleNudgeWordEnd = (wordId: string, currentStart: number, currentEnd: number, delta: number) => {
     const newEnd = Math.max(currentStart + 0.05, currentEnd + delta)
     updateWordTiming(caption.id, wordId, currentStart, newEnd)
+  }
+
+  const handleStartEditWord = (w: Word, e: React.MouseEvent) => {
+    e.stopPropagation()
+    setEditingWordId(w.id)
+    setEditingWordText(w.text)
+  }
+
+  const handleSaveWordEdit = (wordId: string) => {
+    if (editingWordText.trim()) {
+      updateWord(caption.id, wordId, { text: editingWordText.trim() })
+    }
+    setEditingWordId(null)
   }
 
   return (
@@ -90,13 +105,6 @@ export const CaptionItem: React.FC<CaptionItemProps> = ({
             <Play size={12} />
           </button>
           <button
-            onClick={() => setIsEditingText(!isEditingText)}
-            title="Edit full caption text"
-            className="p-1 rounded text-[#8E8E98] hover:text-white hover:bg-[#202028] transition-colors"
-          >
-            <Edit2 size={12} />
-          </button>
-          <button
             onClick={() => deleteCaption(caption.id)}
             title="Delete this caption"
             className="p-1 rounded text-[#8E8E98] hover:text-red-400 hover:bg-[#202028] transition-colors"
@@ -106,23 +114,24 @@ export const CaptionItem: React.FC<CaptionItemProps> = ({
         </div>
       </div>
 
-      {/* FULL TEXT EDITING (If user opens full editor) */}
-      {isEditingText && (
-        <div className="mb-2" onClick={(e) => e.stopPropagation()}>
-          <textarea
-            rows={2}
-            value={caption.text}
-            onChange={(e) => updateCaption(caption.id, { text: e.target.value })}
-            className="w-full resize-none rounded-lg bg-[#0F0F14] border border-[#2D2D38] p-2 text-xs text-white placeholder-text-muted focus:border-accent focus:outline-none"
-          />
-        </div>
-      )}
+      {/* DIRECT INLINE EDITABLE SUBTITLE SENTENCE */}
+      <div className="mb-2.5" onClick={(e) => e.stopPropagation()}>
+        <input
+          type="text"
+          value={caption.text}
+          onChange={(e) => updateCaption(caption.id, { text: e.target.value })}
+          className="w-full rounded-lg bg-[#0E0E13] border border-[#262633] hover:border-[#383848] focus:border-accent px-2.5 py-1.5 text-xs text-white font-semibold focus:outline-none transition-colors"
+          placeholder="Edit subtitle text directly..."
+          title="Click to edit subtitle text directly"
+        />
+      </div>
 
-      {/* WORD PILL CHIPS (Captik style: individual interactive words) */}
+      {/* WORD PILL CHIPS (Captik style: individual interactive words with double-click to edit) */}
       <div className="flex flex-wrap items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
         {(caption.words || []).map((w, widx) => {
           const isWordActive = currentTime >= w.start && currentTime < w.end
           const isWordSelected = selectedWordId === w.id
+          const isWordEditing = editingWordId === w.id
 
           return (
             <div
@@ -140,10 +149,30 @@ export const CaptionItem: React.FC<CaptionItemProps> = ({
                   : "bg-[#1D1D26] border-[#2E2E3C] text-[#D4D4D8] hover:border-[#4B4B5E] hover:text-white"
               }`}
             >
-              <span>{w.text}</span>
+              {isWordEditing ? (
+                <input
+                  autoFocus
+                  type="text"
+                  value={editingWordText}
+                  onChange={(e) => setEditingWordText(e.target.value)}
+                  onBlur={() => handleSaveWordEdit(w.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveWordEdit(w.id)
+                    else if (e.key === "Escape") setEditingWordId(null)
+                  }}
+                  className="w-16 bg-black text-accent font-bold px-1 py-0.5 rounded border border-accent text-xs outline-none"
+                />
+              ) : (
+                <span
+                  onDoubleClick={(e) => handleStartEditWord(w, e)}
+                  title="Click to select • Double-click to edit word"
+                >
+                  {w.text}
+                </span>
+              )}
 
               {/* Split Button on hover */}
-              {widx > 0 && (
+              {widx > 0 && !isWordEditing && (
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -160,10 +189,10 @@ export const CaptionItem: React.FC<CaptionItemProps> = ({
         })}
       </div>
 
-      {/* SELECTED WORD TIMING ADJUSTMENT DRAWER */}
+      {/* SELECTED WORD TIMING & TEXT ADJUSTMENT DRAWER */}
       {selectedWordId && caption.words?.some(w => w.id === selectedWordId) && (
-        <div 
-          className="mt-2.5 pt-2 border-t border-[#23232C] bg-[#111116] rounded-lg p-2 flex items-center justify-between text-[11px] font-mono text-[#A1A1AA]"
+        <div
+          className="mt-2.5 pt-2 border-t border-[#23232C] bg-[#111116] rounded-lg p-2.5 flex items-center justify-between text-[11px] font-mono text-[#A1A1AA] gap-2"
           onClick={(e) => e.stopPropagation()}
         >
           {(() => {
@@ -172,13 +201,19 @@ export const CaptionItem: React.FC<CaptionItemProps> = ({
 
             return (
               <>
-                <div className="flex items-center gap-1">
-                  <span className="text-white font-bold">{curWord.text}</span>
-                  <span className="text-[10px] text-accent">({wordDur}s)</span>
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <input
+                    type="text"
+                    value={curWord.text}
+                    onChange={(e) => updateWord(caption.id, curWord.id, { text: e.target.value })}
+                    className="bg-[#1C1C24] border border-[#2D2D3E] focus:border-accent text-white font-bold text-xs px-1.5 py-0.5 rounded max-w-[100px] outline-none"
+                    title="Edit selected word"
+                  />
+                  <span className="text-[10px] text-accent shrink-0">({wordDur}s)</span>
                 </div>
 
                 {/* Adjust Start / End length buttons */}
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <div className="flex items-center gap-1">
                     <span className="text-[9px] text-[#70707D]">Start:</span>
                     <button

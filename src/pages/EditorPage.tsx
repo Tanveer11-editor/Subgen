@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect } from "react"
-import { 
-  ChevronLeft, Download, Loader2, FileText, AlertTriangle, 
-  HelpCircle, Sparkles, Cloud, Edit2, Film, Music, Sticker, Type, X, Upload
+import {
+  ChevronLeft, Download, Loader2, FileText, AlertTriangle,
+  HelpCircle, Cloud, Edit2, Film, Music, Sticker, Type, X,
+  CheckCircle, Plus, Sparkles
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useEditorStore } from "@/stores/editorStore"
@@ -12,13 +13,13 @@ import { RightSidebarPanel } from "@/components/editor/RightSidebarPanel"
 import { Timeline } from "@/components/editor/Timeline"
 
 export default function EditorPage() {
-  const { 
-    video, 
-    captions, 
-    setCaptions, 
-    setCurrentTime, 
-    selectedCaptionId, 
-    setSelectedCaptionId, 
+  const {
+    video,
+    captions,
+    setCaptions,
+    setCurrentTime,
+    selectedCaptionId,
+    setSelectedCaptionId,
     markSaved,
     outputMode,
     sourceLanguage,
@@ -30,7 +31,6 @@ export default function EditorPage() {
     setProjectTitle,
     resolution,
     setResolution,
-    setVideo,
     loadNewVideo,
     needsTranscription,
     setNeedsTranscription
@@ -47,6 +47,8 @@ export default function EditorPage() {
   const [renderProgress, setRenderProgress] = useState("")
   const [showRetranscribeConfirm, setShowRetranscribeConfirm] = useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = useState(false)
+  const [showExportSuccessModal, setShowExportSuccessModal] = useState(false)
+  const [showNewProjectConfirm, setShowNewProjectConfirm] = useState(false)
   const [isEditingTitle, setIsEditingTitle] = useState(false)
   const [saveSuccessNotice, setSaveSuccessNotice] = useState(false)
   const [activeRailTab, setActiveRailTab] = useState<"captions" | "elements" | "media" | "audio">("captions")
@@ -82,16 +84,23 @@ export default function EditorPage() {
   }
 
   const handleSeek = (time: number) => {
-    const clamped = Math.max(0, Math.min(duration, time))
+    const maxDur = (videoRef.current && isFinite(videoRef.current.duration) && videoRef.current.duration > 0)
+      ? videoRef.current.duration
+      : (duration > 0 ? duration : 13.2)
+    const clamped = Math.max(0, Math.min(maxDur, time))
     if (videoRef.current) {
-      videoRef.current.currentTime = clamped
+      try {
+        videoRef.current.currentTime = clamped
+      } catch (err) {
+        console.error("Seek error:", err)
+      }
     }
     setCurrentTime(clamped)
   }
 
   const handleSaveProject = () => {
     try {
-      localStorage.setItem("captik_project_saved", JSON.stringify({
+      localStorage.setItem("subgen_project_saved", JSON.stringify({
         title: projectTitle,
         captions,
         resolution
@@ -104,13 +113,37 @@ export default function EditorPage() {
     }
   }
 
+  const handleNewVideoSelected = async (file: File) => {
+    if (!file.type.startsWith("video/")) {
+      alert("Please upload a valid video file (MP4, MOV, WebM).")
+      return
+    }
+
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = null
+    }
+
+    setIsTranscribing(false)
+    setTranscribeProgress("")
+
+    // 1. Immediately wipe previous captions from dashboard
+    setCaptions([], true)
+
+    // 2. Load the new video into store and player
+    loadNewVideo(file)
+
+    // 3. Immediately trigger fresh transcription for this new video
+    await executeTranscription(file)
+  }
+
   const initiateTranscription = () => {
     executeTranscription()
   }
 
-  const executeTranscription = async () => {
+  const executeTranscription = async (overrideFile?: File) => {
     setShowRetranscribeConfirm(false)
-    let fileToUpload = video.file
+    let fileToUpload = overrideFile || useEditorStore.getState().video.file
 
     // If no direct File object in memory (e.g. demo video or URL), fetch it as blob
     if (!fileToUpload && video.url) {
@@ -122,7 +155,6 @@ export default function EditorPage() {
         const ext = video.url.includes(".mov") ? "mov" : video.url.includes(".webm") ? "webm" : "mp4"
         const filename = `${projectTitle || "video"}.${ext}`
         fileToUpload = new File([blob], filename, { type: blob.type || `video/${ext}` })
-        setVideo({ file: fileToUpload })
       } catch (err: any) {
         console.error("Failed to load video file from URL:", err)
       }
@@ -134,8 +166,10 @@ export default function EditorPage() {
       return alert("Please select or upload a video first!")
     }
 
+    // Always clear old captions so the dashboard never shows previous video subtitles
+    setCaptions([], true)
     setIsTranscribing(true)
-    setTranscribeProgress("Uploading video...")
+    setTranscribeProgress("Uploading video to AI server...")
 
     if (pollIntervalRef.current) {
       clearInterval(pollIntervalRef.current)
@@ -144,15 +178,15 @@ export default function EditorPage() {
 
     try {
       const uploadRes = await uploadVideo(fileToUpload)
-      setTranscribeProgress("Analyzing speech with AI...")
-      
+      setTranscribeProgress("Analyzing speech with AI & generating subtitles...")
+
       const transcribeRes = await startTranscription(
-        uploadRes.id, 
-        sourceLanguage, 
-        outputMode, 
+        uploadRes.id,
+        sourceLanguage,
+        outputMode,
         maxWordsPerCaption
       )
-      
+
       pollIntervalRef.current = setInterval(async () => {
         try {
           const status = await checkJobStatus(transcribeRes.job_id)
@@ -167,7 +201,7 @@ export default function EditorPage() {
               setCaptions(status.result, true)
             } else {
               setCaptions([], true)
-              alert("Transcription completed. No speech detected in audio.")
+              alert("Transcription completed. No spoken speech detected in audio.")
             }
           } else if (status.status === "processing") {
             if (status.progress) {
@@ -205,7 +239,6 @@ export default function EditorPage() {
         const blob = await res.blob()
         const ext = video.url.includes(".mov") ? "mov" : video.url.includes(".webm") ? "webm" : "mp4"
         fileToExport = new File([blob], `${projectTitle || "video"}.${ext}`, { type: blob.type || `video/${ext}` })
-        setVideo({ file: fileToExport })
       } catch (e) {
         console.error("Failed to fetch demo video for export:", e)
       }
@@ -225,19 +258,20 @@ export default function EditorPage() {
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
+        setShowExportSuccessModal(true)
       }, 1500)
       return
     }
 
     if (captions.length === 0) return alert("No captions available to burn in.")
-    
+
     setIsRendering(true)
     setRenderProgress("Uploading...")
     try {
       const uploadRes = await uploadVideo(fileToExport)
       setRenderProgress("Burning subtitles via FFmpeg...")
       const renderRes = await startRender(uploadRes.id, captions, activeTemplate, textPositionX, textPositionY)
-      
+
       const poll = setInterval(async () => {
         try {
           const status = await checkJobStatus(renderRes.job_id)
@@ -252,6 +286,7 @@ export default function EditorPage() {
             document.body.appendChild(downloadLink)
             downloadLink.click()
             document.body.removeChild(downloadLink)
+            setShowExportSuccessModal(true)
           } else if (status.status === "error") {
             clearInterval(poll)
             setIsRendering(false)
@@ -269,7 +304,7 @@ export default function EditorPage() {
 
   const handleExportSRT = () => {
     if (captions.length === 0) return alert("No captions to export as SRT.")
-    
+
     const formatSRTTime = (seconds: number) => {
       const hrs = Math.floor(seconds / 3600).toString().padStart(2, "0")
       const mins = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0")
@@ -304,7 +339,7 @@ export default function EditorPage() {
                 <HelpCircle size={20} className="text-accent" />
                 <h3 className="text-base font-bold text-white">Keyboard Shortcuts & Controls</h3>
               </div>
-              <button 
+              <button
                 onClick={() => setShowShortcutsModal(false)}
                 className="text-[#8E8E98] hover:text-white p-1"
               >
@@ -385,8 +420,75 @@ export default function EditorPage() {
               <Button variant="ghost" size="sm" onClick={() => setShowRetranscribeConfirm(false)}>
                 Cancel
               </Button>
-              <Button variant="accent" size="sm" onClick={executeTranscription}>
+              <Button variant="accent" size="sm" onClick={() => executeTranscription()}>
                 Replace & Retranscribe
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Project / Video Confirmation Modal */}
+      {showNewProjectConfirm && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#14141A] border border-[#2B2B38] rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3 text-accent">
+              <Sparkles size={24} />
+              <h3 className="text-base font-bold text-white">Start New Video Project?</h3>
+            </div>
+            <p className="text-xs text-[#A1A1AA] leading-relaxed">
+              Uploading a new video will clear all current captions and generate brand new word-level transcriptions for your new video.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button variant="ghost" size="sm" onClick={() => setShowNewProjectConfirm(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="accent"
+                size="sm"
+                onClick={() => {
+                  setShowNewProjectConfirm(false)
+                  uploadVideoInputRef.current?.click()
+                }}
+              >
+                Choose New Video
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Complete Success Modal */}
+      {showExportSuccessModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-[#14141A] border border-[#2B2B38] rounded-2xl p-6 max-w-md w-full shadow-2xl text-center space-y-4 animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto text-emerald-400">
+              <CheckCircle size={28} />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-white">Video Exported Successfully!</h3>
+              <p className="text-xs text-[#8E8E98] mt-1.5 leading-relaxed">
+                Your video with burned subtitles has been downloaded. Ready to edit and transcribe a new video?
+              </p>
+            </div>
+            <div className="flex flex-col gap-2.5 pt-2">
+              <Button
+                variant="accent"
+                className="w-full font-bold shadow-md shadow-accent/20 flex items-center justify-center gap-2"
+                onClick={() => {
+                  setShowExportSuccessModal(false)
+                  uploadVideoInputRef.current?.click()
+                }}
+              >
+                <Sparkles size={14} />
+                <span>Edit A New Video</span>
+              </Button>
+              <Button
+                variant="outline"
+                className="w-full text-xs text-[#8E8E98] hover:text-white"
+                onClick={() => setShowExportSuccessModal(false)}
+              >
+                Continue Current Project
               </Button>
             </div>
           </div>
@@ -399,21 +501,21 @@ export default function EditorPage() {
       <header className="h-13 shrink-0 border-b border-[#23232C] bg-[#101015] px-4 flex items-center justify-between z-30">
         {/* Left: Brand Logo, Project Name, Resolution */}
         <div className="flex items-center gap-3.5">
-          <button 
-            onClick={() => window.history.back()} 
+          <button
+            onClick={() => window.history.back()}
             className="p-1.5 rounded-lg hover:bg-[#1C1C24] text-[#8E8E98] hover:text-white transition-colors"
             title="Go Back"
           >
             <ChevronLeft size={18} />
           </button>
 
-          {/* Captik Logo Mark */}
+          {/* SubGen Logo Mark */}
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded-lg bg-accent text-black font-black text-xs flex items-center justify-center shadow-md shadow-accent/25">
-              C
+              S
             </div>
             <span className="font-extrabold text-sm tracking-tight text-white">
-              Captik
+              SubGen
             </span>
           </div>
 
@@ -430,7 +532,7 @@ export default function EditorPage() {
                 className="bg-[#1C1C24] border border-accent/80 text-xs px-2 py-0.5 rounded text-white focus:outline-none max-w-[200px]"
               />
             ) : (
-              <div 
+              <div
                 onClick={() => setIsEditingTitle(true)}
                 className="flex items-center gap-1.5 text-xs font-mono text-[#D4D4D8] hover:text-white cursor-pointer px-1.5 py-0.5 rounded hover:bg-[#1A1A22] transition-colors"
                 title="Click to rename project"
@@ -472,11 +574,7 @@ export default function EditorPage() {
             onChange={(e) => {
               const file = e.target.files?.[0]
               if (file) {
-                if (!file.type.startsWith("video/")) {
-                  alert("Please upload a valid video file.")
-                  return
-                }
-                loadNewVideo(file)
+                handleNewVideoSelected(file)
               }
               if (e.target) e.target.value = ""
             }}
@@ -485,33 +583,29 @@ export default function EditorPage() {
           />
 
           <button
-            onClick={() => uploadVideoInputRef.current?.click()}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#181822] hover:bg-[#222230] border border-[#2E2E3E] hover:border-accent/60 text-xs font-semibold text-[#D4D4D8] hover:text-white transition-all shadow-sm active:scale-95"
-            title="Upload a new video to replace and regenerate captions"
+            onClick={() => {
+              if (captions.length > 0) {
+                setShowNewProjectConfirm(true)
+              } else {
+                uploadVideoInputRef.current?.click()
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent hover:bg-[#FFC425] text-black text-xs font-bold transition-all shadow-md shadow-accent/20 active:scale-95"
+            title="Upload a new video to replace and generate fresh captions"
           >
-            <Upload size={12} className="text-accent" />
+            <Plus size={14} className="stroke-[3]" />
             <span>New Video</span>
           </button>
         </div>
 
-        {/* Right: Usage Tracker, Remove Watermark, Save, SRT, Help, Export */}
+        {/* Right: Save, SRT, Help, Export */}
         <div className="flex items-center gap-2.5">
-          {/* Usage Badge (0/2 min) */}
-          <div className="flex items-center gap-1 px-2 py-1 rounded-full bg-[#2A1414] border border-[#6B2424] text-[#F87171] text-[11px] font-bold">
-            <span>0/2 min</span>
-          </div>
-
-          {/* Clean Pro / No Watermark Badge */}
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-emerald-500/15 border border-emerald-500/35 text-emerald-400 shadow-sm">
-            <Sparkles size={12} />
-            <span>Pro • No Watermark</span>
-          </div>
 
           {/* Save Button */}
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="gap-1.5 text-xs h-8 bg-[#16161C] border-[#2A2A36] text-[#D4D4D8] hover:text-white hover:border-accent/60 transition-colors" 
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs h-8 bg-[#16161C] border-[#2A2A36] text-[#D4D4D8] hover:text-white hover:border-accent/60 transition-colors"
             onClick={handleSaveProject}
           >
             <Cloud size={13} />
@@ -519,10 +613,10 @@ export default function EditorPage() {
           </Button>
 
           {/* SRT Export Button */}
-          <Button 
-            variant="outline" 
-            size="sm" 
-            className="gap-1.5 text-xs h-8 bg-[#16161C] border-[#2A2A36] text-[#D4D4D8] hover:text-white hover:border-accent/60 transition-colors" 
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1.5 text-xs h-8 bg-[#16161C] border-[#2A2A36] text-[#D4D4D8] hover:text-white hover:border-accent/60 transition-colors"
             onClick={handleExportSRT}
           >
             <FileText size={13} />
@@ -609,7 +703,7 @@ export default function EditorPage() {
         </aside>
 
         {/* Column 1: Caption Editor Panel */}
-        <CaptionEditorPanel 
+        <CaptionEditorPanel
           duration={duration}
           onSeek={handleSeek}
           onTranscribe={initiateTranscription}
@@ -618,12 +712,13 @@ export default function EditorPage() {
         />
 
         {/* Column 2: Video Player & Canvas Preview */}
-        <VideoPreview 
+        <VideoPreview
           duration={duration}
           onTimeUpdate={handleTimeUpdate}
           onDurationChange={setVideoDuration}
           onSeek={handleSeek}
           videoRef={videoRef}
+          onLoadNewVideo={handleNewVideoSelected}
         />
 
         {/* Column 3: Right Sidebar Panel (Templates, Customize, Text) */}
@@ -633,7 +728,10 @@ export default function EditorPage() {
       {/* ========================================================================= */}
       {/* BOTTOM SECTION: MULTI-TRACK TIMELINE (Interactive word resize, trim, JKL) */}
       {/* ========================================================================= */}
-      <Timeline />
+      <Timeline
+        duration={duration}
+        onSeek={handleSeek}
+      />
     </div>
   )
 }
